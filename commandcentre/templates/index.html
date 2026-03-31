@@ -4,24 +4,124 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CommandCentre</title>
+    <style>
+      /* Slide toggles (checkboxes styled as switches) */
+      .cc-switch {
+        position: relative;
+        display: inline-flex;
+        flex-shrink: 0;
+        cursor: pointer;
+        align-items: center;
+        vertical-align: middle;
+      }
+      .cc-switch input {
+        position: absolute;
+        opacity: 0;
+        width: 0;
+        height: 0;
+        margin: 0;
+      }
+      .cc-switch .cc-switch-track {
+        display: block;
+        width: 2.75rem;
+        height: 1.5rem;
+        border-radius: 9999px;
+        background: rgb(51 65 85);
+        transition: background 0.2s ease;
+        position: relative;
+      }
+      .cc-switch input:focus-visible + .cc-switch-track {
+        outline: 2px solid rgb(56 189 248 / 0.45);
+        outline-offset: 2px;
+      }
+      .cc-switch input:checked + .cc-switch-track {
+        background: rgb(5 150 105);
+      }
+      .cc-switch .cc-switch-track::after {
+        content: "";
+        position: absolute;
+        left: 2px;
+        top: 2px;
+        width: 1.25rem;
+        height: 1.25rem;
+        border-radius: 9999px;
+        background: white;
+        box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+        transition: transform 0.2s ease;
+      }
+      .cc-switch input:checked + .cc-switch-track::after {
+        transform: translateX(1.25rem);
+      }
+      .cc-switch input:disabled + .cc-switch-track {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+    </style>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script defer src="./assets/js/app.js"></script>
   </head>
   <body class="bg-slate-950 text-slate-100 h-screen overflow-hidden">
     <header class="border-b border-slate-800 p-3 flex items-center gap-2">
-      <div id="workspaceTabs" class="flex gap-2 overflow-x-auto"></div>
+      <div id="workspaceTabs" class="flex gap-2 overflow-x-auto" aria-busy="false"></div>
+      <div
+        id="workspaceLoadingIndicator"
+        class="hidden shrink-0 items-center gap-2 text-xs text-slate-400"
+        role="status"
+        aria-live="polite"
+      >
+        <span
+          class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400"
+          aria-hidden="true"
+        ></span>
+        <span>Loading workspace…</span>
+      </div>
       <button
         id="newWorkspaceBtn"
-        class="ml-2 rounded bg-blue-600 px-3 py-1 text-sm hover:bg-blue-500"
+        type="button"
+        class="ml-2 shrink-0 rounded bg-blue-600 px-2.5 py-1 text-base font-semibold leading-none hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+        title="New workspace"
+        aria-label="New workspace"
       >
-        + Workspace
+        +
       </button>
       <div class="ml-auto flex items-center gap-2">
-        <button id="openSettingsBtn" class="rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700">Settings</button>
-        <button id="openSearchBtn" class="rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700">Search</button>
-        <button id="showDashboard" class="rounded bg-slate-800 px-3 py-1 text-sm">Dashboard</button>
-        <button id="showKanban" class="rounded bg-slate-800 px-3 py-1 text-sm">Kanban</button>
+        <button
+          id="openSearchBtn"
+          type="button"
+          class="rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700"
+          title="Search"
+          aria-label="Search"
+        >
+          Search
+        </button>
+        <button
+          id="showDashboard"
+          type="button"
+          class="rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700"
+          title="Dashboard"
+          aria-label="Dashboard"
+        >
+          Dashboard
+        </button>
+        <button
+          id="showKanban"
+          type="button"
+          class="rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700"
+          title="Kanban"
+          aria-label="Kanban"
+        >
+          Kanban
+        </button>
+        <button
+          id="openSettingsBtn"
+          type="button"
+          class="rounded bg-slate-800 px-2.5 py-1 text-base leading-none hover:bg-slate-700"
+          title="Settings"
+          aria-label="Settings"
+        >
+          ⚙
+        </button>
       </div>
     </header>
 
@@ -30,10 +130,17 @@
         <div id="dashboardScrollable" class="flex-1 overflow-y-auto flex flex-col gap-3">
           <div class="rounded border border-slate-800 p-3 flex flex-col bg-slate-950/95">
           <div class="flex items-center justify-between mb-2">
-            <h2 class="text-lg font-semibold">Launcher</h2>
+            <h2
+              id="launcherSectionTitle"
+              class="text-lg font-semibold cursor-pointer select-none hover:text-slate-100"
+              title="Click to expand or collapse"
+              role="button"
+              tabindex="0"
+            >
+              Launcher
+            </h2>
             <div class="flex items-center gap-2">
               <button id="addAppBtn" class="rounded bg-emerald-700 px-2 py-1 text-xs hover:bg-emerald-600">+ App</button>
-              <button id="toggleLauncherBtn" class="rounded bg-slate-800 px-2 py-1 text-xs hover:bg-slate-700">Collapse</button>
             </div>
           </div>
           <div id="launcherContent">
@@ -42,10 +149,17 @@
           </div>
           <div class="rounded border border-slate-800 p-3 flex flex-col bg-slate-950/95">
           <div class="flex items-center justify-between mb-2">
-            <h2 class="text-lg font-semibold">Library</h2>
+            <h2
+              id="librarySectionTitle"
+              class="text-lg font-semibold cursor-pointer select-none hover:text-slate-100"
+              title="Click to expand or collapse"
+              role="button"
+              tabindex="0"
+            >
+              Library
+            </h2>
             <div class="flex items-center gap-2">
               <button id="addResourceBtn" class="rounded bg-emerald-700 px-2 py-1 text-xs hover:bg-emerald-600">+ Resource</button>
-              <button id="toggleLibraryBtn" class="rounded bg-slate-800 px-2 py-1 text-xs hover:bg-slate-700">Collapse</button>
             </div>
           </div>
           <div id="libraryContent">
@@ -54,30 +168,63 @@
           </div>
         </div>
         <div class="rounded border border-slate-800 p-3 bg-slate-950/98 backdrop-blur">
-          <div class="flex items-center justify-between mb-2">
-            <h2 class="text-lg font-semibold">Safe</h2>
+          <div class="flex items-center justify-between mb-2 gap-2">
+            <div class="flex items-center gap-1.5 min-w-0 flex-1">
+              <h2
+                id="safeSectionTitle"
+                class="text-lg font-semibold cursor-pointer select-none hover:text-slate-100"
+                title="Click to expand or collapse"
+                role="button"
+                tabindex="0"
+              >
+                Safe
+              </h2>
+              <button
+                type="button"
+                id="safeLockBtn"
+                class="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                title="Lock Safe (collapse and require password to reopen)"
+                aria-label="Lock Safe"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-5 w-5" aria-hidden="true">
+                  <path fill-rule="evenodd" d="M12 1.5a5.25 5.25 0 0 0-5.25 5.25v3a3 3 0 0 0-3 3v6.75a3 3 0 0 0 3 3h10.5a3 3 0 0 0 3-3v-6.75a3 3 0 0 0-3-3v-3c0-2.9-2.35-5.25-5.25-5.25Zm3.75 8.25v-3a3.75 3.75 0 1 0-7.5 0v3h7.5Z" clip-rule="evenodd" />
+                </svg>
+              </button>
+            </div>
             <div class="flex items-center gap-2">
-                <button id="safeCreateNoteBtn" class="rounded bg-emerald-700 px-2 py-1 text-xs hover:bg-emerald-600">New Note</button>
+              <button id="safeCreateNoteBtn" class="rounded bg-emerald-700 px-2 py-1 text-xs hover:bg-emerald-600">New Note</button>
               <button id="safeRefreshBtn" class="rounded bg-slate-800 px-2 py-1 text-xs hover:bg-slate-700">Refresh</button>
-              <button id="toggleSafeBtn" class="rounded bg-slate-800 px-2 py-1 text-xs hover:bg-slate-700">Collapse</button>
             </div>
           </div>
           <div id="safeContent">
             <p id="safeStatus" class="text-xs text-slate-400 mb-2">Checking Proton Pass CLI status...</p>
             <div id="safeContainer" class="rounded border border-slate-800 p-3 bg-slate-900 space-y-3">
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
-                <label class="text-xs block">
-                  <div class="text-slate-300 mb-1">Vault</div>
-                  <select id="safeVaultSelect" class="w-full rounded bg-slate-950 border border-slate-800 px-2 py-1 text-sm"></select>
-                </label>
-                <label class="text-xs block md:col-span-1">
-                  <div class="text-slate-300 mb-1">Search</div>
-                  <input id="safeItemSearch" class="w-full rounded bg-slate-950 border border-slate-800 px-2 py-1 text-sm" placeholder="Filter by title..." />
-                </label>
-                <label class="text-xs text-slate-300 flex items-center gap-2 md:justify-end pb-1">
-                  <input id="safeShowTrashed" type="checkbox" class="h-4 w-4 rounded border-slate-700 bg-slate-900" />
-                  Show trashed items
-                </label>
+              <div class="grid grid-cols-1 gap-3 md:grid-cols-12 md:gap-4 md:items-end">
+                <div class="flex min-w-0 flex-col gap-1 md:col-span-4">
+                  <label for="safeVaultSelect" class="text-xs font-medium text-slate-300">Vault</label>
+                  <select
+                    id="safeVaultSelect"
+                    class="h-9 w-full rounded-md border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 shadow-sm focus:border-slate-600 focus:outline-none focus:ring-1 focus:ring-slate-600"
+                  ></select>
+                </div>
+                <div class="flex min-w-0 flex-col gap-1 md:col-span-6">
+                  <label for="safeItemSearch" class="text-xs font-medium text-slate-300">Search</label>
+                  <input
+                    id="safeItemSearch"
+                    type="search"
+                    class="h-9 w-full rounded-md border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 shadow-sm placeholder:text-slate-500 focus:border-slate-600 focus:outline-none focus:ring-1 focus:ring-slate-600"
+                    placeholder="Filter by title..."
+                  />
+                </div>
+                <div class="flex min-w-0 flex-col gap-1 md:col-span-2">
+                  <span class="text-xs font-medium text-slate-300">Show trashed</span>
+                  <div class="flex h-9 items-center">
+                    <label class="cc-switch">
+                      <input id="safeShowTrashed" type="checkbox" aria-label="Show trashed items" />
+                      <span class="cc-switch-track" aria-hidden="true"></span>
+                    </label>
+                  </div>
+                </div>
               </div>
               <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 <div class="min-h-[300px]">
@@ -88,8 +235,6 @@
                   <div class="flex items-center justify-between mb-1">
                     <div class="text-sm text-slate-300">Item Details</div>
                     <div class="flex items-center gap-2">
-                      <button id="safeCopyPrimaryBtn" class="rounded bg-slate-800 px-2 py-1 text-[10px] hover:bg-slate-700">Copy Login</button>
-                      <button id="safeCopyPasswordBtn" class="rounded bg-slate-800 px-2 py-1 text-[10px] hover:bg-slate-700">Copy Password</button>
                       <button id="safeTotpBtn" class="rounded bg-slate-800 px-2 py-1 text-[10px] hover:bg-slate-700">Get TOTP</button>
                       <button id="safeDeleteItemBtn" class="rounded bg-red-800 px-2 py-1 text-[10px] hover:bg-red-700">Delete Item</button>
                     </div>
@@ -190,13 +335,13 @@
 
     <div id="searchModalRoot" class="hidden fixed inset-0 z-50">
       <div id="searchBackdrop" class="absolute inset-0 bg-black/60"></div>
-      <div class="absolute inset-0 flex items-start justify-center p-6">
-        <div class="w-full max-w-2xl rounded-lg border border-slate-800 bg-slate-950 shadow-xl">
+      <div class="pointer-events-none absolute inset-0 flex items-start justify-center p-6">
+        <div class="pointer-events-auto w-full max-w-2xl rounded-lg border border-slate-800 bg-slate-950 shadow-xl">
           <div class="border-b border-slate-800 p-3">
             <input
               id="searchInput"
               class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2 text-sm"
-              placeholder="Search workspaces, tasks, apps, resources..."
+              placeholder="Search workspaces, tasks, apps, resources (including library descriptions)..."
             />
             <div class="mt-1 text-xs text-slate-400">Shortcut: Super+K (or Ctrl+K)</div>
           </div>
@@ -224,6 +369,31 @@
               <div class="text-slate-300 mb-1">Command / Path</div>
               <input id="crudCommand" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
             </label>
+            <div id="crudIconRow" class="hidden rounded border border-slate-800 bg-slate-950/40 p-3">
+              <div class="text-sm text-slate-300 mb-2">Launcher icon</div>
+              <div class="flex flex-wrap items-center gap-3">
+                <label class="flex items-center gap-2 text-sm text-slate-200">
+                  <input id="crudIconTypeUnicode" type="radio" name="crudIconType" value="unicode" class="h-4 w-4" />
+                  Unicode
+                </label>
+                <label class="flex items-center gap-2 text-sm text-slate-200">
+                  <input id="crudIconTypeFile" type="radio" name="crudIconType" value="file" class="h-4 w-4" />
+                  Icon file
+                </label>
+              </div>
+              <div id="crudIconUnicodeRow" class="mt-3">
+                <div class="text-xs text-slate-400 mb-1">Character (e.g. 🖿 ⚙ ✦)</div>
+                <input id="crudIconUnicode" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
+              </div>
+              <div id="crudIconFileRow" class="mt-3 hidden">
+                <div class="text-xs text-slate-400 mb-1">Path to icon image</div>
+                <div class="flex items-center gap-2">
+                  <input id="crudIconFile" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
+                  <button id="crudPickIconFile" type="button" class="shrink-0 rounded bg-slate-800 px-2 py-2 text-xs hover:bg-slate-700" title="Pick icon file">Browse</button>
+                </div>
+                <div class="mt-2 text-xs text-slate-500">Supported: png, jpg, svg, ico, webp (max 512KB)</div>
+              </div>
+            </div>
             <label id="crudTypeRow" class="text-sm block hidden">
               <div class="text-slate-300 mb-1">Type</div>
               <select id="crudType" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2">
@@ -252,7 +422,7 @@
       </div>
     </div>
 
-    <div id="textModalRoot" class="hidden fixed inset-0 z-50">
+    <div id="textModalRoot" class="hidden fixed inset-0 z-[70]">
       <div id="textBackdrop" class="absolute inset-0 bg-black/60"></div>
       <div class="absolute inset-0 flex items-center justify-center p-4">
         <div class="w-full max-w-md rounded-lg border border-slate-800 bg-slate-950 shadow-xl">
@@ -329,21 +499,62 @@
           </div>
           <div class="p-4 space-y-5">
             <div class="rounded border border-slate-800 p-3">
-              <label class="flex items-center justify-between gap-3">
+              <label class="flex min-h-[2.75rem] cursor-pointer items-center justify-between gap-4">
                 <span class="text-sm text-slate-200">Launch CommandCentre on startup</span>
-                <input id="autostartToggle" type="checkbox" class="h-4 w-4 rounded border-slate-700 bg-slate-900" />
+                <span class="cc-switch">
+                  <input id="autostartToggle" type="checkbox" />
+                  <span class="cc-switch-track" aria-hidden="true"></span>
+                </span>
               </label>
             </div>
             <div class="rounded border border-slate-800 p-3 space-y-3">
               <div class="text-sm text-slate-300">Integrations</div>
-              <label class="flex items-center justify-between gap-3">
+              <label class="flex min-h-[2.75rem] cursor-pointer items-center justify-between gap-4">
                 <span class="text-sm text-slate-200">Enable system tray icon</span>
-                <input id="trayToggle" type="checkbox" class="h-4 w-4 rounded border-slate-700 bg-slate-900" />
+                <span class="cc-switch">
+                  <input id="trayToggle" type="checkbox" />
+                  <span class="cc-switch-track" aria-hidden="true"></span>
+                </span>
               </label>
-              <label class="flex items-center justify-between gap-3">
+              <label class="flex min-h-[2.75rem] cursor-pointer items-center justify-between gap-4">
                 <span class="text-sm text-slate-200">Enable global search hotkey (<span class="font-mono">Super+K</span>)</span>
-                <input id="hotkeyToggle" type="checkbox" class="h-4 w-4 rounded border-slate-700 bg-slate-900" />
+                <span class="cc-switch">
+                  <input id="hotkeyToggle" type="checkbox" />
+                  <span class="cc-switch-track" aria-hidden="true"></span>
+                </span>
               </label>
+            </div>
+            <div class="rounded border border-slate-800 p-3 space-y-3">
+              <div class="text-sm text-slate-300">Safe section lock PIN</div>
+              <p class="text-xs text-slate-500 leading-relaxed">
+                This PIN only hides the Safe panel from casual viewing while your session is unlocked. It is stored in the
+                app database as plain text and is not a substitute for locking your computer or signing out of your user
+                account.
+              </p>
+              <p id="safeLockPinStatus" class="text-xs text-slate-400"></p>
+              <label class="block text-xs">
+                <span class="text-slate-300 mb-1 block">New PIN</span>
+                <input
+                  id="safeLockPinNew"
+                  type="password"
+                  autocomplete="new-password"
+                  class="w-full max-w-sm rounded bg-slate-900 border border-slate-800 px-2 py-1 text-sm"
+                />
+              </label>
+              <label class="block text-xs">
+                <span class="text-slate-300 mb-1 block">Confirm PIN</span>
+                <input
+                  id="safeLockPinConfirm"
+                  type="password"
+                  autocomplete="new-password"
+                  class="w-full max-w-sm rounded bg-slate-900 border border-slate-800 px-2 py-1 text-sm"
+                />
+              </label>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" id="safeLockPinSaveBtn" class="rounded bg-emerald-700 px-3 py-1.5 text-xs hover:bg-emerald-600">
+                  Save PIN
+                </button>
+              </div>
             </div>
             <div class="rounded border border-slate-800 p-3">
               <div class="flex items-center justify-between mb-2">
@@ -367,6 +578,23 @@
     </div>
 
     <div id="toastRoot" class="fixed bottom-4 right-4 z-[60] flex max-w-sm flex-col gap-2"></div>
+    <div
+      id="launcherContextMenu"
+      class="hidden fixed z-[80] min-w-[140px] rounded border border-slate-700 bg-slate-900 p-1 shadow-xl"
+    >
+      <button
+        id="launcherContextEdit"
+        class="block w-full rounded px-2 py-1.5 text-left text-xs text-slate-200 hover:bg-slate-800"
+      >
+        Edit
+      </button>
+      <button
+        id="launcherContextDelete"
+        class="block w-full rounded px-2 py-1.5 text-left text-xs text-red-300 hover:bg-red-950/70"
+      >
+        Delete
+      </button>
+    </div>
   </body>
 </html>
 

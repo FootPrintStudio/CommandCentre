@@ -1,3 +1,5 @@
+import sys
+
 import webview
 
 from .api import CommandCentreAPI
@@ -18,7 +20,11 @@ def main():
         min_size=(1000, 700),
     )
     system.configure_runtime(window)
-    webview.start(func=system.start_integrations, debug=True)
+    # Linux: use Qt (PyQt6 + PyQt6-WebEngine in requirements) so a venv works without system PyGObject/GTK.
+    start_kw = dict(func=system.start_integrations, debug=True)
+    if sys.platform.startswith("linux"):
+        start_kw["gui"] = "qt"
+    webview.start(**start_kw)
 
 
 if __name__ == "__main__":

@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS apps (
   workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   command_path TEXT NOT NULL,
-  category TEXT DEFAULT 'Uncategorized'
+  category TEXT DEFAULT 'Uncategorized',
+  icon_type TEXT DEFAULT 'unicode',
+  icon_value TEXT
 );
 
 CREATE TABLE IF NOT EXISTS resources (
@@ -74,11 +76,12 @@ def initialize_database() -> None:
     DATABASE_DIR.mkdir(parents=True, exist_ok=True)
     with get_connection() as conn:
         conn.executescript(SCHEMA_SQL)
+        _ensure_apps_icon_columns(conn)
         workspace_count = conn.execute("SELECT COUNT(*) AS count FROM workspaces").fetchone()["count"]
         if workspace_count == 0:
             cursor = conn.execute(
                 "INSERT INTO workspaces(name, icon) VALUES (?, ?)",
-                ("Default", "fa-folder"),
+                ("Default", "🖿"),
             )
             workspace_id = cursor.lastrowid
             conn.executemany(
@@ -90,6 +93,14 @@ def initialize_database() -> None:
                 ],
             )
         conn.commit()
+
+
+def _ensure_apps_icon_columns(conn: sqlite3.Connection) -> None:
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(apps)").fetchall()}
+    if "icon_type" not in cols:
+        conn.execute("ALTER TABLE apps ADD COLUMN icon_type TEXT DEFAULT 'unicode'")
+    if "icon_value" not in cols:
+        conn.execute("ALTER TABLE apps ADD COLUMN icon_value TEXT")
 
 
 @contextmanager

@@ -3,6 +3,8 @@ import json
 import re
 import shutil
 import subprocess
+import base64
+import mimetypes
 import webbrowser
 
 import webview
@@ -84,6 +86,48 @@ def _sanitize_cli_lines(lines: list[str], excluded_lower: set[str]) -> list[str]
             continue
         cleaned.append(line)
     return cleaned
+
+
+# Proton Pass `item view --output json`: `content.content` holds type-specific blobs.
+_PASS_ITEM_TYPE_KEYS = (
+    "Login",
+    "Alias",
+    "Note",
+    "Card",
+    "CreditCard",
+    "PaymentCard",
+    "Identity",
+    "Wifi",
+    "WifiCredentials",
+    "SSHKey",
+    "CryptoWallet",
+)
+
+
+def _merge_pass_item_type_buckets(nested_content: dict) -> dict:
+    """Merge Login + Card + … into one dict. Items often include both a sparse Login and Card data."""
+    merged: dict = {}
+    if not isinstance(nested_content, dict):
+        return merged
+    for name in _PASS_ITEM_TYPE_KEYS:
+        node = nested_content.get(name)
+        if isinstance(node, dict) and node:
+            merged.update(node)
+    for key, node in nested_content.items():
+        if key in _PASS_ITEM_TYPE_KEYS:
+            continue
+        if isinstance(node, dict) and node:
+            merged.update(node)
+    return merged
+
+
+def _pretty_pass_field_key(key: str) -> str:
+    """API keys like cardholderName -> display label Cardholder Name."""
+    if not key:
+        return key
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", key)
+    spaced = spaced.replace("_", " ").strip()
+    return spaced.title()
 
 
 def _parse_bracket_id_line(entry: str) -> tuple[str, str, str] | None:
@@ -313,15 +357,12 @@ def safe_cli_get_item(vault_id: str, item_id: str) -> dict:
                 # Handle modern output shape: { "item": {...}, "attachments": [...] }
                 item_obj = parsed.get("item") if isinstance(parsed.get("item"), dict) else parsed
                 content = item_obj.get("content") if isinstance(item_obj.get("content"), dict) else {}
-                login_obj = {}
                 nested_content = content.get("content")
-                if isinstance(nested_content, dict):
-                    # Common type-specific buckets like Login, Note, Card...
-                    for candidate in ("Login", "Alias", "Note", "Card", "Identity"):
-                        node = nested_content.get(candidate)
-                        if isinstance(node, dict):
-                            login_obj = node
-                            break
+                merged_type = (
+                    _merge_pass_item_type_buckets(nested_content)
+                    if isinstance(nested_content, dict)
+                    else {}
+                )
 
                 title = (
                     content.get("title")
@@ -341,9 +382,9 @@ def safe_cli_get_item(vault_id: str, item_id: str) -> dict:
                     if isinstance(value, str) and value.strip():
                         fields[key] = value.strip()
 
-                # Proton Pass nested login fields
-                email_value = login_obj.get("email")
-                username_value = login_obj.get("username")
+                # Proton Pass nested fields (Login, Card, Identity, … merged)
+                email_value = merged_type.get("email")
+                username_value = merged_type.get("username")
                 if isinstance(username_value, str) and username_value.strip():
                     fields["username"] = username_value.strip()
                 if isinstance(email_value, str) and email_value.strip():
@@ -358,15 +399,31 @@ def safe_cli_get_item(vault_id: str, item_id: str) -> dict:
                         fields["email"] = normalized
 
                 for key in ("password", "totp_uri"):
-                    value = login_obj.get(key)
+                    value = merged_type.get(key)
                     if isinstance(value, str) and value.strip():
                         fields[key] = value.strip()
 
-                urls = login_obj.get("urls")
+                urls = merged_type.get("urls")
                 if isinstance(urls, list):
                     normalized_urls = [u.strip() for u in urls if isinstance(u, str) and u.strip()]
                     if normalized_urls:
                         fields["urls"] = ", ".join(normalized_urls)
+
+                _login_handled = {"username", "email", "password", "totp_uri", "urls"}
+                for key, value in merged_type.items():
+                    if key in _login_handled:
+                        continue
+                    if isinstance(value, str) and value.strip():
+                        label = _pretty_pass_field_key(key)
+                        fields[label] = value.strip()
+                    elif isinstance(value, list) and value:
+                        parts = [
+                            str(x).strip()
+                            for x in value
+                            if isinstance(x, str) and x.strip()
+                        ]
+                        if parts:
+                            fields[_pretty_pass_field_key(key)] = ", ".join(parts)
 
                 note_value = content.get("note")
                 if isinstance(note_value, str) and note_value.strip():
@@ -674,6 +731,43 @@ def _build_tray_icon_image():
     return img
 
 
+def pick_icon_file() -> dict:
+    window = RUNTIME.get("main_window")
+    if window is None:
+        return {"ok": False, "error": "Main window is not ready."}
+    try:
+        selection = window.create_file_dialog(
+            webview.OPEN_DIALOG,
+            allow_multiple=False,
+            file_types=("Images (*.png;*.jpg;*.jpeg;*.svg;*.ico;*.webp)", "*.png;*.jpg;*.jpeg;*.svg;*.ico;*.webp"),
+        )
+        if not selection:
+            return {"ok": True, "path": ""}
+        return {"ok": True, "path": selection[0]}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+
+
+def read_icon_file(path: str) -> dict:
+    p = str(path or "").strip()
+    if not p:
+        return {"ok": False, "error": "Missing icon path."}
+    if not os.path.exists(p):
+        return {"ok": False, "error": "Icon file not found."}
+    try:
+        size = os.path.getsize(p)
+        if size > 512 * 1024:
+            return {"ok": False, "error": "Icon file too large (max 512KB)."}
+        mime, _enc = mimetypes.guess_type(p)
+        mime = mime or "application/octet-stream"
+        with open(p, "rb") as f:
+            data = f.read()
+        b64 = base64.b64encode(data).decode("ascii")
+        return {"ok": True, "data_url": f"data:{mime};base64,{b64}"}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+
+
 def _start_tray() -> dict:
     if pystray is None:
         return {"ok": False, "warning": "pystray/Pillow not installed; tray disabled."}
@@ -728,11 +822,64 @@ def _get_setting_bool(key: str, default: bool) -> bool:
     return str(row.get("value", "")).strip().lower() in {"1", "true", "yes", "on"}
 
 
+SAFE_LOCK_PIN_KEY = "safe_lock_pin"
+DEFAULT_SAFE_LOCK_PIN = "0000"
+
+
+def _get_safe_lock_pin_stored() -> str | None:
+    """None means no custom row — effective PIN is DEFAULT_SAFE_LOCK_PIN."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?",
+            (SAFE_LOCK_PIN_KEY,),
+        ).fetchone()
+    if not row:
+        return None
+    v = row.get("value")
+    if v is None:
+        return None
+    s = str(v).strip()
+    return s if s else None
+
+
+def get_effective_safe_lock_pin() -> str:
+    stored = _get_safe_lock_pin_stored()
+    if stored is None:
+        return DEFAULT_SAFE_LOCK_PIN
+    return stored
+
+
+def verify_safe_lock_pin(pin: str | None) -> dict:
+    entered = "" if pin is None else str(pin)
+    expected = get_effective_safe_lock_pin()
+    return {"ok": entered == expected}
+
+
+def set_safe_lock_pin(pin: str | None) -> dict:
+    """Empty or whitespace clears the custom PIN (reverts to default)."""
+    normalized = "" if pin is None else str(pin).strip()
+    with get_connection() as conn:
+        if not normalized:
+            conn.execute("DELETE FROM app_settings WHERE key = ?", (SAFE_LOCK_PIN_KEY,))
+        else:
+            conn.execute(
+                """
+                INSERT INTO app_settings(key, value, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+                """,
+                (SAFE_LOCK_PIN_KEY, normalized),
+            )
+        conn.commit()
+    return {"ok": True}
+
+
 def get_integration_settings() -> dict:
     return {
         "tray_enabled": _get_setting_bool("tray_enabled", True),
         "hotkey_enabled": _get_setting_bool("hotkey_enabled", True),
         "hotkey_combo": "Super+K",
+        "safe_lock_pin_is_custom": _get_safe_lock_pin_stored() is not None,
     }
 
 

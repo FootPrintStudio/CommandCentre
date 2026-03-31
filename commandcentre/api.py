@@ -50,23 +50,43 @@ class CommandCentreAPI:
                 (workspace_id,),
             ).fetchall()
 
-    def create_app(self, workspace_id, name, command_path, category="Uncategorized"):
+    def create_app(
+        self,
+        workspace_id,
+        name,
+        command_path,
+        category="Uncategorized",
+        icon_type="unicode",
+        icon_value="",
+    ):
         with get_connection() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO apps(workspace_id, name, command_path, category)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO apps(workspace_id, name, command_path, category, icon_type, icon_value)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (workspace_id, name, command_path, category),
+                (workspace_id, name, command_path, category, icon_type, icon_value),
             )
             conn.commit()
             return {"id": cursor.lastrowid}
 
-    def update_app(self, app_id, name, command_path, category="Uncategorized"):
+    def update_app(
+        self,
+        app_id,
+        name,
+        command_path,
+        category="Uncategorized",
+        icon_type="unicode",
+        icon_value="",
+    ):
         with get_connection() as conn:
             conn.execute(
-                "UPDATE apps SET name = ?, command_path = ?, category = ? WHERE id = ?",
-                (name, command_path, category, app_id),
+                """
+                UPDATE apps
+                SET name = ?, command_path = ?, category = ?, icon_type = ?, icon_value = ?
+                WHERE id = ?
+                """,
+                (name, command_path, category, icon_type, icon_value, app_id),
             )
             conn.commit()
         return {"ok": True}
@@ -283,6 +303,12 @@ class CommandCentreAPI:
     def safe_cli_create_note(self, vault_id, title, note):
         return system.safe_cli_create_note(vault_id, title, note)
 
+    def pick_icon_file(self):
+        return system.pick_icon_file()
+
+    def read_icon_file(self, path):
+        return system.read_icon_file(path)
+
     def get_workspace_safe_pref(self, workspace_id):
         with get_connection() as conn:
             row = conn.execute(
@@ -310,6 +336,12 @@ class CommandCentreAPI:
 
     def get_integration_settings(self):
         return system.get_integration_settings()
+
+    def verify_safe_lock_pin(self, pin):
+        return system.verify_safe_lock_pin(pin)
+
+    def set_safe_lock_pin(self, pin):
+        return system.set_safe_lock_pin(pin)
 
     def set_tray_enabled(self, enabled):
         normalized = bool(enabled)

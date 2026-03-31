@@ -32,6 +32,10 @@ const state = {
   safeNoteModal: {
     open: false,
   },
+  launcherContext: {
+    open: false,
+    appId: null,
+  },
   settings: {
     open: false,
     autostartEnabled: false,
@@ -42,8 +46,14 @@ const state = {
     launcherCollapsed: false,
     libraryCollapsed: false,
     safeCollapsed: false,
+    safeLocked: false,
     appCategoriesCollapsed: {},
     resourceCategoriesCollapsed: {},
+    appIconCache: {},
+    appIconPending: {},
+  },
+  workspaceUi: {
+    loading: false,
   },
   safe: {
     partitionKey: null,
@@ -55,13 +65,33 @@ const state = {
     selectedItemDetail: null,
     searchQuery: "",
     showTrashed: false,
-    revealPassword: false,
     latestTotp: "",
   },
 };
 
 function el(id) {
   return document.getElementById(id);
+}
+
+/** Legacy FontAwesome-style ids from older defaults; map to Unicode for display and editing. */
+const LEGACY_WORKSPACE_ICONS = {
+  "fa-folder": "🖿",
+  "fa-code": "💻",
+  "fa-briefcase": "💼",
+  "fa-home": "🏠",
+  "fa-star": "⭐",
+  "fa-globe": "🌐",
+};
+
+/**
+ * Resolved icon for tabs and lists (Unicode). Unknown `fa-*` falls back to 🖿.
+ */
+function resolveWorkspaceIcon(icon) {
+  const raw = String(icon ?? "").trim();
+  if (!raw) return "🖿";
+  if (LEGACY_WORKSPACE_ICONS[raw]) return LEGACY_WORKSPACE_ICONS[raw];
+  if (raw.startsWith("fa-")) return "🖿";
+  return raw;
 }
 
 function notify(message, type = "info") {
@@ -114,24 +144,69 @@ async function copyToClipboard(value) {
   return ok;
 }
 
+function updateWorkspaceLoadingChrome() {
+  const loading = Boolean(state.workspaceUi.loading);
+  const indicator = el("workspaceLoadingIndicator");
+  if (indicator) {
+    indicator.classList.toggle("hidden", !loading);
+    indicator.classList.toggle("flex", loading);
+  }
+  const tabsRoot = el("workspaceTabs");
+  if (tabsRoot) {
+    tabsRoot.setAttribute("aria-busy", loading ? "true" : "false");
+  }
+  const newBtn = el("newWorkspaceBtn");
+  if (newBtn) {
+    newBtn.disabled = loading;
+    newBtn.classList.toggle("opacity-50", loading);
+    newBtn.classList.toggle("cursor-not-allowed", loading);
+    newBtn.classList.toggle("pointer-events-none", loading);
+  }
+}
+
 function renderWorkspaceTabs() {
   const tabs = el("workspaceTabs");
   tabs.innerHTML = "";
+  const loading = Boolean(state.workspaceUi.loading);
   state.workspaces.forEach((workspace) => {
     const button = document.createElement("button");
     const isActive = workspace.id === state.activeWorkspaceId;
     button.className = `rounded px-3 py-1 text-sm ${
       isActive ? "bg-blue-600" : "bg-slate-800 hover:bg-slate-700"
-    }`;
-    button.textContent = `${workspace.icon || "fa-folder"} ${workspace.name}`;
+    } ${loading ? "opacity-60 cursor-wait" : ""}`;
+    button.textContent = `${resolveWorkspaceIcon(workspace.icon)} ${workspace.name}`;
+    button.disabled = loading;
+    button.classList.toggle("pointer-events-none", loading);
     button.onclick = async () => {
-      state.activeWorkspaceId = workspace.id;
-      await loadWorkspaceData();
-      await refreshSafePanel();
-      renderAll();
+      await switchWorkspace(workspace.id);
     };
     tabs.appendChild(button);
   });
+  updateWorkspaceLoadingChrome();
+}
+
+async function switchWorkspace(workspaceId) {
+  if (state.workspaceUi.loading) {
+    notify("Workspace is still loading…", "info");
+    return false;
+  }
+  if (Number(workspaceId) === Number(state.activeWorkspaceId)) {
+    return true;
+  }
+  state.workspaceUi.loading = true;
+  state.activeWorkspaceId = workspaceId;
+  renderWorkspaceTabs();
+  try {
+    await loadWorkspaceData();
+    await refreshSafePanel();
+    return true;
+  } catch (error) {
+    notify(`Workspace switch failed: ${error.message}`, "error");
+    return false;
+  } finally {
+    state.workspaceUi.loading = false;
+    renderAll();
+  }
 }
 
 function groupByCategory(items) {
@@ -143,80 +218,183 @@ function groupByCategory(items) {
   }, {});
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Field labels from Safe item JSON (see system._pretty_pass_field_key): password + bank card secrets. */
+function isSafeDetailObfuscatedField(key) {
+  const n = String(key || "")
+    .trim()
+    .toLowerCase();
+  return n === "password" || n === "number" || n === "verification number" || n === "pin";
+}
+
+/** First visible character for a simple “desktop icon” glyph (supports multi-codepoint graphemes). */
+function launcherAppGlyph(name) {
+  const s = String(name || "").trim();
+  if (!s) return "?";
+  const chars = [...s];
+  const ch = chars[0] || "?";
+  if (/^[a-z]$/i.test(ch)) return ch.toUpperCase();
+  return ch;
+}
+
+function getAppTileIconHtml(app) {
+  const iconType = String(app?.icon_type || "unicode").toLowerCase();
+  const iconValue = String(app?.icon_value || "").trim();
+  if (iconType === "file" && iconValue) {
+    const cached = state.dashboard.appIconCache[iconValue];
+    if (cached) {
+      return `<img src="${cached}" alt="" class="h-8 w-8 object-contain" />`;
+    }
+    queueAppIconLoad(iconValue);
+  }
+  const glyph = iconValue || launcherAppGlyph(app?.name);
+  return `<span class="select-none font-normal leading-none text-2xl sm:text-3xl text-slate-50">${escapeHtml(glyph)}</span>`;
+}
+
+function queueAppIconLoad(path) {
+  const p = String(path || "").trim();
+  if (!p) return;
+  if (state.dashboard.appIconCache[p]) return;
+  if (state.dashboard.appIconPending[p]) return;
+  state.dashboard.appIconPending[p] = true;
+  apiCall("read_icon_file", p)
+    .then((result) => {
+      if (result?.ok && result?.data_url) {
+        state.dashboard.appIconCache[p] = result.data_url;
+      }
+    })
+    .catch((error) => {
+      console.error(error);
+    })
+    .finally(() => {
+      delete state.dashboard.appIconPending[p];
+      renderDashboard(state.lastApps || [], state.lastResources || []);
+    });
+}
+
 function renderDashboard(apps, resources) {
+  if (state.dashboard.safeLocked) {
+    state.dashboard.safeCollapsed = true;
+  }
   el("launcherContent")?.classList.toggle("hidden", state.dashboard.launcherCollapsed);
   el("libraryContent")?.classList.toggle("hidden", state.dashboard.libraryCollapsed);
   el("safeContent")?.classList.toggle("hidden", state.dashboard.safeCollapsed);
-  const launcherBtn = el("toggleLauncherBtn");
-  const libraryBtn = el("toggleLibraryBtn");
-  const safeBtn = el("toggleSafeBtn");
-  if (launcherBtn) launcherBtn.textContent = state.dashboard.launcherCollapsed ? "Expand" : "Collapse";
-  if (libraryBtn) libraryBtn.textContent = state.dashboard.libraryCollapsed ? "Expand" : "Collapse";
-  if (safeBtn) safeBtn.textContent = state.dashboard.safeCollapsed ? "Expand" : "Collapse";
+  el("launcherSectionTitle")?.setAttribute(
+    "aria-expanded",
+    String(!state.dashboard.launcherCollapsed),
+  );
+  el("librarySectionTitle")?.setAttribute(
+    "aria-expanded",
+    String(!state.dashboard.libraryCollapsed),
+  );
+  el("safeSectionTitle")?.setAttribute("aria-expanded", String(!state.dashboard.safeCollapsed));
+  const safeTitle = el("safeSectionTitle");
+  if (safeTitle) {
+    safeTitle.title = state.dashboard.safeLocked
+      ? "Locked — click to enter password"
+      : "Click to expand or collapse";
+  }
+  const safeLockBtn = el("safeLockBtn");
+  if (safeLockBtn) {
+    safeLockBtn.classList.toggle("text-amber-400", state.dashboard.safeLocked);
+    safeLockBtn.classList.toggle("ring-1", state.dashboard.safeLocked);
+    safeLockBtn.classList.toggle("ring-amber-600/50", state.dashboard.safeLocked);
+    safeLockBtn.title = state.dashboard.safeLocked
+      ? "Safe is locked — click to enter password"
+      : "Lock Safe (collapse and require password to reopen)";
+    safeLockBtn.setAttribute(
+      "aria-label",
+      state.dashboard.safeLocked ? "Unlock Safe" : "Lock Safe",
+    );
+  }
 
   const appsList = el("appsList");
   const appsByCat = groupByCategory(apps);
   appsList.innerHTML =
     apps.length === 0
       ? "No apps yet."
-      : Object.entries(appsByCat)
-          .map(
-            ([category, items]) => `
-          <div class="mb-2">
-            <button class="w-full text-left text-xs uppercase tracking-wide text-slate-400 mb-1 hover:text-slate-200" data-toggle-app-category="${category}">
-              ${state.dashboard.appCategoriesCollapsed[category] ? "▸" : "▾"} ${category}
-            </button>
-            <div class="grid grid-cols-1 gap-1 ${state.dashboard.appCategoriesCollapsed[category] ? "hidden" : ""}">
-              ${items
-                .map(
-                  (app) => `
-                  <div class="flex items-center justify-between rounded bg-slate-900 px-2 py-1">
-                    <button class="text-left flex-1 truncate hover:text-slate-50" data-launch-app="${app.id}">
-                      ${app.name}
-                    </button>
-                    <button class="ml-2 text-xs text-slate-400 hover:text-slate-200" data-edit-app="${app.id}">Edit</button>
-                    <button class="ml-2 text-xs text-red-300 hover:text-red-200" data-delete-app="${app.id}">Del</button>
-                  </div>
-                `
-                )
-                .join("")}
+      : `<div class="flex flex-wrap gap-3">
+          ${Object.entries(appsByCat)
+            .map(
+              ([category, items]) => `
+            <div class="w-full md:basis-[calc(33.333%-0.75rem)] md:max-w-[calc(33.333%-0.75rem)] rounded border border-slate-800 bg-slate-950/70 p-1.5">
+              <button class="w-full text-left text-xs uppercase tracking-wide text-slate-400 mb-1.5 hover:text-slate-200" data-toggle-app-category="${category}">
+                ${state.dashboard.appCategoriesCollapsed[category] ? "▸" : "▾"} ${category}
+              </button>
+              <div class="grid grid-cols-[repeat(auto-fit,minmax(4rem,1fr))] gap-x-1 gap-y-2 ${state.dashboard.appCategoriesCollapsed[category] ? "hidden" : ""}">
+                ${items
+                  .map(
+                    (app) => `
+                    <div class="group relative flex min-w-0 flex-col items-center gap-1 pt-0.5" data-app-tile="${app.id}">
+                      <button
+                        type="button"
+                        data-launch-app="${app.id}"
+                        class="flex h-11 w-11 flex-col items-center justify-center rounded-lg border border-slate-600 bg-gradient-to-b from-slate-700 to-slate-800 text-lg shadow transition hover:border-sky-500/60 hover:from-slate-600 hover:to-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500/50 sm:h-12 sm:w-12 sm:text-xl"
+                        title="${escapeHtml(app.name)}"
+                      >
+                        ${getAppTileIconHtml(app)}
+                      </button>
+                      <span class="w-full min-w-0 select-none px-0.5 text-center text-[10px] leading-tight text-slate-300 whitespace-normal break-words [overflow-wrap:anywhere] line-clamp-2 sm:text-[11px]">${escapeHtml(
+                        app.name
+                      )}</span>
+                    </div>
+                  `
+                  )
+                  .join("")}
+              </div>
             </div>
-          </div>
-        `
-          )
-          .join("");
+          `
+            )
+            .join("")}
+        </div>`;
 
   const resourcesList = el("resourcesList");
   const resByCat = groupByCategory(resources);
   resourcesList.innerHTML =
     resources.length === 0
       ? "No resources yet."
-      : Object.entries(resByCat)
-          .map(
-            ([category, items]) => `
-          <div class="mb-2">
-            <button class="w-full text-left text-xs uppercase tracking-wide text-slate-400 mb-1 hover:text-slate-200" data-toggle-resource-category="${category}">
-              ${state.dashboard.resourceCategoriesCollapsed[category] ? "▸" : "▾"} ${category}
-            </button>
-            <div class="space-y-1 ${state.dashboard.resourceCategoriesCollapsed[category] ? "hidden" : ""}">
-              ${items
-                .map(
-                  (res) => `
-                  <div class="flex items-center justify-between rounded bg-slate-900 px-2 py-1">
-                    <button class="text-left flex-1 truncate hover:text-slate-50" data-open-resource="${res.id}">
-                      ${res.name}
-                    </button>
-                    <button class="ml-2 text-xs text-slate-400 hover:text-slate-200" data-edit-resource="${res.id}">Edit</button>
-                    <button class="ml-2 text-xs text-red-300 hover:text-red-200" data-delete-resource="${res.id}">Del</button>
-                  </div>
-                `
-                )
-                .join("")}
+      : `<div class="flex flex-wrap gap-3">
+          ${Object.entries(resByCat)
+            .map(
+              ([category, items]) => `
+            <div class="w-full md:basis-[calc(33.333%-0.75rem)] md:max-w-[calc(33.333%-0.75rem)] rounded border border-slate-800 bg-slate-950/70 p-2">
+              <button class="w-full text-left text-xs uppercase tracking-wide text-slate-400 mb-2 hover:text-slate-200" data-toggle-resource-category="${category}">
+                ${state.dashboard.resourceCategoriesCollapsed[category] ? "▸" : "▾"} ${category}
+              </button>
+              <div class="space-y-1 ${state.dashboard.resourceCategoriesCollapsed[category] ? "hidden" : ""}">
+                ${items
+                  .map(
+                    (res) => `
+                    <div class="flex items-center justify-between rounded bg-slate-900 px-2 py-1">
+                      <button class="text-left flex-1 min-w-0 hover:text-slate-50" data-open-resource="${res.id}">
+                        <div class="truncate">${res.name}</div>
+                        ${
+                          String(res.description || "").trim()
+                            ? `<div class="mt-0.5 text-[11px] text-slate-400 whitespace-normal break-words [overflow-wrap:anywhere]">${escapeHtml(
+                                String(res.description).trim()
+                              )}</div>`
+                            : ""
+                        }
+                      </button>
+                      <button class="ml-2 text-xs text-slate-400 hover:text-slate-200" data-edit-resource="${res.id}">Edit</button>
+                      <button class="ml-2 text-xs text-red-300 hover:text-red-200" data-delete-resource="${res.id}">Del</button>
+                    </div>
+                  `
+                  )
+                  .join("")}
+              </div>
             </div>
-          </div>
-        `
-          )
-          .join("");
+          `
+            )
+            .join("")}
+        </div>`;
 }
 
 function renderKanban() {
@@ -513,6 +691,7 @@ function openCrudModal(kind, mode, entity = null) {
   const isApp = kind === "app";
   el("crudModalTitle").textContent = `${mode === "create" ? "Add" : "Edit"} ${isApp ? "App" : "Resource"}`;
   el("crudCommandRow").classList.toggle("hidden", !isApp);
+  el("crudIconRow").classList.toggle("hidden", !isApp);
   el("crudTypeRow").classList.toggle("hidden", isApp);
   el("crudPathRow").classList.toggle("hidden", isApp);
   el("crudDescriptionRow").classList.toggle("hidden", isApp);
@@ -520,6 +699,13 @@ function openCrudModal(kind, mode, entity = null) {
   el("crudName").value = entity?.name ?? "";
   el("crudCategory").value = entity?.category ?? "Uncategorized";
   el("crudCommand").value = entity?.command_path ?? "";
+  const iconType = String(entity?.icon_type || "unicode").toLowerCase();
+  el("crudIconTypeUnicode").checked = iconType !== "file";
+  el("crudIconTypeFile").checked = iconType === "file";
+  el("crudIconUnicode").value = iconType === "file" ? "" : String(entity?.icon_value || "").trim();
+  el("crudIconFile").value = iconType === "file" ? String(entity?.icon_value || "").trim() : "";
+  el("crudIconUnicodeRow").classList.toggle("hidden", iconType === "file");
+  el("crudIconFileRow").classList.toggle("hidden", iconType !== "file");
   el("crudType").value = entity?.type ?? "file";
   el("crudPath").value = entity?.path ?? "";
   el("crudDescription").value = entity?.description ?? "";
@@ -533,14 +719,16 @@ function closeCrudModal() {
   el("crudModalRoot").classList.add("hidden");
 }
 
-function openTextModal({ title, label, value = "" }) {
+function openTextModal({ title, label, value = "", inputType = "text" }) {
   state.textModal.open = true;
   el("textModalTitle").textContent = title;
   el("textModalLabel").textContent = label;
-  el("textModalInput").value = value;
+  const input = el("textModalInput");
+  input.type = inputType;
+  input.value = value;
   el("textModalRoot").classList.remove("hidden");
-  el("textModalInput").focus();
-  el("textModalInput").select();
+  input.focus();
+  if (inputType !== "password") input.select();
 
   return new Promise((resolve) => {
     state.textModal.resolver = resolve;
@@ -552,6 +740,7 @@ function closeTextModal(result = null) {
   state.textModal.open = false;
   state.textModal.resolver = null;
   el("textModalRoot").classList.add("hidden");
+  el("textModalInput").type = "text";
 }
 
 function openConfirmModal({ title = "Confirm", message = "Are you sure?" }) {
@@ -584,13 +773,31 @@ function closeSafeNoteModal() {
   el("safeNoteModalRoot").classList.add("hidden");
 }
 
+function openLauncherContextMenu(appId, x, y) {
+  state.launcherContext.open = true;
+  state.launcherContext.appId = Number(appId);
+  const menu = el("launcherContextMenu");
+  if (!menu) return;
+  menu.classList.remove("hidden");
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+}
+
+function closeLauncherContextMenu() {
+  state.launcherContext.open = false;
+  state.launcherContext.appId = null;
+  const menu = el("launcherContextMenu");
+  if (!menu) return;
+  menu.classList.add("hidden");
+}
+
 function renderWorkspaceSettingsList() {
   const root = el("workspaceSettingsList");
   root.innerHTML = state.workspaces
     .map(
       (workspace) => `
       <div class="flex items-center justify-between rounded bg-slate-900 px-3 py-2">
-        <span class="truncate pr-2">${workspace.icon || "fa-folder"} ${workspace.name}</span>
+        <span class="truncate pr-2">${resolveWorkspaceIcon(workspace.icon)} ${workspace.name}</span>
         <div class="flex items-center gap-2">
           <button class="text-xs text-sky-300 hover:text-sky-200" data-edit-workspace-icon="${workspace.id}">Icon</button>
           <button class="text-xs text-slate-300 hover:text-white" data-rename-workspace="${workspace.id}">Rename</button>
@@ -600,6 +807,19 @@ function renderWorkspaceSettingsList() {
     `
     )
     .join("");
+}
+
+function updateSafeLockPinSettingsUI(settings) {
+  const status = el("safeLockPinStatus");
+  if (status) {
+    status.textContent = settings?.safe_lock_pin_is_custom
+      ? "A custom PIN is saved (not shown)."
+      : "Using the default PIN 0000 (nothing custom saved in the database).";
+  }
+  const n = el("safeLockPinNew");
+  const c = el("safeLockPinConfirm");
+  if (n) n.value = "";
+  if (c) c.value = "";
 }
 
 async function openSettingsModal() {
@@ -619,6 +839,7 @@ async function openSettingsModal() {
     state.settings.hotkeyEnabled = Boolean(settings?.hotkey_enabled ?? true);
     el("trayToggle").checked = state.settings.trayEnabled;
     el("hotkeyToggle").checked = state.settings.hotkeyEnabled;
+    updateSafeLockPinSettingsUI(settings);
   } catch (error) {
     notify(`Failed to read integration settings: ${error.message}`, "error");
   }
@@ -644,10 +865,13 @@ async function saveCrudModal() {
       notify("Command / path is required.", "error");
       return;
     }
+    const iconType = el("crudIconTypeFile").checked ? "file" : "unicode";
+    const iconValue =
+      iconType === "file" ? el("crudIconFile").value.trim() : el("crudIconUnicode").value.trim();
     if (state.crud.mode === "create") {
-      await apiCall("create_app", state.activeWorkspaceId, name, commandPath, category);
+      await apiCall("create_app", state.activeWorkspaceId, name, commandPath, category, iconType, iconValue);
     } else {
-      await apiCall("update_app", state.crud.entityId, name, commandPath, category);
+      await apiCall("update_app", state.crud.entityId, name, commandPath, category, iconType, iconValue);
     }
   } else if (state.crud.kind === "resource") {
     const type = el("crudType").value;
@@ -795,6 +1019,7 @@ async function buildSearchIndex() {
         workspace_id: workspace.id,
         title: res.name,
         subtitle: `Resource in ${workspace.name}`,
+        description: res.description != null ? String(res.description) : "",
       })
     );
 
@@ -850,9 +1075,10 @@ function renderSearchResults(query) {
 function scoreSearchEntry(entry, query) {
   const title = String(entry.title || "").toLowerCase();
   const subtitle = String(entry.subtitle || "").toLowerCase();
-  const full = `${title} ${subtitle}`.trim();
+  const description = String(entry.description || "").toLowerCase();
+  const full = `${title} ${subtitle} ${description}`.trim();
 
-  if (!title && !subtitle) return 0;
+  if (!title && !subtitle && !description) return 0;
 
   let score = 0;
 
@@ -899,13 +1125,12 @@ function subsequenceScore(text, query) {
 }
 
 async function jumpToWorkspace(workspaceId) {
-  state.activeWorkspaceId = workspaceId;
-  await loadWorkspaceData();
-  renderAll();
+  return switchWorkspace(workspaceId);
 }
 
 async function handleSearchResultClick(entryKind, entryId, workspaceId) {
-  await jumpToWorkspace(workspaceId);
+  const switched = await jumpToWorkspace(workspaceId);
+  if (!switched) return;
 
   if (entryKind === "workspace") {
     closeSearchModal();
@@ -1096,44 +1321,51 @@ function renderSafePanel() {
     const detail = state.safe.selectedItemDetail;
     const fields = detail.fields || {};
     const normalizedFields = { ...fields };
-    if (normalizedFields.password && !state.safe.revealPassword) {
-      normalizedFields.password = "••••••••";
-    }
     if (state.safe.latestTotp) {
       normalizedFields.totp = state.safe.latestTotp;
     }
     const fieldRows = Object.entries(fields)
       .filter(([k]) => k !== "totp_uri")
-      .map(
-        ([k, _v]) => `
+      .map(([k, v]) => {
+        if (isSafeDetailObfuscatedField(k)) {
+          const raw = v == null ? "" : String(v);
+          const safe = escapeHtml(raw);
+          const obscured = raw ? "••••••••" : "—";
+          const copyKey = encodeURIComponent(k);
+          return `
         <div class="py-1 border-b border-slate-900">
-          <div class="text-[10px] uppercase tracking-wide text-slate-500">${k}</div>
-          <div class="text-slate-200 break-all">${normalizedFields[k] ?? ""}</div>
+          <div class="text-[10px] uppercase tracking-wide text-slate-500">${escapeHtml(k)}</div>
+          <div class="group safe-field-copy min-h-[1.25rem] cursor-pointer rounded px-1 -mx-1 hover:bg-slate-900/60" data-safe-copy-key="${copyKey}" title="Click to copy">
+            <span class="font-mono text-slate-200 break-all select-all group-hover:hidden">${obscured}</span>
+            <span class="hidden font-mono text-slate-200 break-all select-all group-hover:block">${safe}</span>
+          </div>
         </div>
-      `
-      )
+      `;
+        }
+        const display = normalizedFields[k] ?? "";
+        const text = typeof display === "string" ? display : String(display);
+        const copyKey = encodeURIComponent(k);
+        return `
+        <div class="py-1 border-b border-slate-900">
+          <div class="text-[10px] uppercase tracking-wide text-slate-500">${escapeHtml(k)}</div>
+          <div class="safe-field-copy cursor-pointer rounded px-1 -mx-1 text-slate-200 break-all hover:bg-slate-900/60" data-safe-copy-key="${copyKey}" title="Click to copy">${escapeHtml(
+            text
+          )}</div>
+        </div>
+      `;
+      })
       .join("");
     detailEl.innerHTML = `
-      <div class="mb-2">
-        <div class="text-slate-200 font-semibold">${detail.name || detail.id}</div>
-        <div class="text-[10px] text-slate-500">${detail.id}</div>
+      <div class="mb-2 space-y-0.5">
+        <div class="safe-field-copy cursor-pointer rounded px-1 -mx-1 font-semibold text-slate-200 hover:bg-slate-900/60" data-safe-copy-key="__name__" title="Click to copy">${escapeHtml(
+          detail.name || String(detail.id)
+        )}</div>
+        <div class="safe-field-copy cursor-pointer rounded px-1 -mx-1 text-[10px] text-slate-500 hover:bg-slate-900/60" data-safe-copy-key="__id__" title="Click to copy">${escapeHtml(
+          String(detail.id)
+        )}</div>
       </div>
       ${fieldRows || '<div class="text-slate-500">No readable fields returned for this item.</div>'}
-      ${
-        fields.password
-          ? `<button id="safeTogglePasswordBtn" class="mt-2 rounded bg-slate-800 px-2 py-1 text-[10px] hover:bg-slate-700">${
-              state.safe.revealPassword ? "Hide Password" : "Reveal Password"
-            }</button>`
-          : ""
-      }
     `;
-    const toggleBtn = el("safeTogglePasswordBtn");
-    if (toggleBtn) {
-      toggleBtn.onclick = () => {
-        state.safe.revealPassword = !state.safe.revealPassword;
-        renderSafePanel();
-      };
-    }
   }
 
   renderSafeSettingsStatus();
@@ -1210,7 +1442,6 @@ async function loadSafeItemDetail(itemId) {
     throw new Error(result?.error || "Failed to load item detail.");
   }
   state.safe.selectedItemDetail = result.item || null;
-  state.safe.revealPassword = false;
   state.safe.latestTotp = "";
 }
 
@@ -1253,27 +1484,103 @@ async function bootstrap() {
   state.workspaces = await apiCall("get_workspaces");
   if (state.workspaces.length > 0) {
     state.activeWorkspaceId = state.workspaces[0].id;
-    await loadWorkspaceData();
-    await refreshSafePanel();
+    state.workspaceUi.loading = true;
+    renderWorkspaceTabs();
+    try {
+      await loadWorkspaceData();
+      await refreshSafePanel();
+    } catch (error) {
+      notify(`Failed to load workspace: ${error.message}`, "error");
+    } finally {
+      state.workspaceUi.loading = false;
+      renderAll();
+    }
+    return;
   }
   renderAll();
+}
+
+async function tryUnlockSafeSection() {
+  const pwd = await openTextModal({
+    title: "Unlock Safe",
+    label: "PIN",
+    value: "",
+    inputType: "password",
+  });
+  if (pwd == null) return;
+  try {
+    const result = await apiCall("verify_safe_lock_pin", pwd);
+    if (result?.ok) {
+      state.dashboard.safeLocked = false;
+      state.dashboard.safeCollapsed = false;
+      renderDashboard(state.lastApps || [], state.lastResources || []);
+      notify("Safe unlocked.", "success");
+    } else {
+      notify("Incorrect PIN.", "error");
+    }
+  } catch (error) {
+    notify(`Unlock failed: ${error.message}`, "error");
+  }
 }
 
 function initUI() {
   el("showDashboard").onclick = () => setView("dashboard");
   el("showKanban").onclick = () => setView("kanban");
-  el("toggleLauncherBtn").onclick = () => {
-    state.dashboard.launcherCollapsed = !state.dashboard.launcherCollapsed;
-    renderDashboard(state.lastApps || [], state.lastResources || []);
-  };
-  el("toggleLibraryBtn").onclick = () => {
-    state.dashboard.libraryCollapsed = !state.dashboard.libraryCollapsed;
-    renderDashboard(state.lastApps || [], state.lastResources || []);
-  };
-  el("toggleSafeBtn").onclick = () => {
-    state.dashboard.safeCollapsed = !state.dashboard.safeCollapsed;
-    renderDashboard(state.lastApps || [], state.lastResources || []);
-  };
+  function bindSectionTitleToggle(titleId, collapsedKey) {
+    const node = el(titleId);
+    if (!node) return;
+    const toggle = () => {
+      state.dashboard[collapsedKey] = !state.dashboard[collapsedKey];
+      renderDashboard(state.lastApps || [], state.lastResources || []);
+    };
+    node.onclick = (e) => {
+      e.preventDefault();
+      toggle();
+    };
+    node.onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        toggle();
+      }
+    };
+  }
+  function bindSafeSectionTitleToggle() {
+    const node = el("safeSectionTitle");
+    if (!node) return;
+    const onActivate = (e) => {
+      e.preventDefault();
+      if (state.dashboard.safeLocked) {
+        tryUnlockSafeSection();
+        return;
+      }
+      state.dashboard.safeCollapsed = !state.dashboard.safeCollapsed;
+      renderDashboard(state.lastApps || [], state.lastResources || []);
+    };
+    node.onclick = onActivate;
+    node.onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onActivate(e);
+      }
+    };
+  }
+  bindSectionTitleToggle("launcherSectionTitle", "launcherCollapsed");
+  bindSectionTitleToggle("librarySectionTitle", "libraryCollapsed");
+  bindSafeSectionTitleToggle();
+  const safeLockBtn = el("safeLockBtn");
+  if (safeLockBtn) {
+    safeLockBtn.onclick = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (state.dashboard.safeLocked) {
+        tryUnlockSafeSection();
+        return;
+      }
+      state.dashboard.safeCollapsed = true;
+      state.dashboard.safeLocked = true;
+      renderDashboard(state.lastApps || [], state.lastResources || []);
+    };
+  }
   el("openSettingsBtn").onclick = () => {
     openSettingsModal().catch((error) => {
       notify(`Failed to open settings: ${error.message}`, "error");
@@ -1370,26 +1677,36 @@ function initUI() {
       .then(() => renderSafePanel())
       .catch((error) => notify(`Failed to load item detail: ${error.message}`, "error"));
   });
-  el("safeCopyPrimaryBtn").onclick = async () => {
-    const fields = state.safe.selectedItemDetail?.fields || {};
-    const primary = fields.username || fields.email || "";
-    if (!primary) {
-      notify("No username/email to copy.", "info");
+  el("safeItemDetail").addEventListener("click", async (event) => {
+    const node = event.target.closest(".safe-field-copy[data-safe-copy-key]");
+    if (!node || !el("safeItemDetail").contains(node)) return;
+    const detail = state.safe.selectedItemDetail;
+    if (!detail) return;
+    const encoded = node.dataset.safeCopyKey || "";
+    let rawKey;
+    try {
+      rawKey = decodeURIComponent(encoded);
+    } catch {
       return;
     }
-    const ok = await copyToClipboard(primary);
-    notify(ok ? "Copied login to clipboard." : "Failed to copy login.", ok ? "success" : "error");
-  };
-  el("safeCopyPasswordBtn").onclick = async () => {
-    const fields = state.safe.selectedItemDetail?.fields || {};
-    const value = fields.password || "";
-    if (!value) {
-      notify("No password field available.", "info");
+    let textToCopy = "";
+    if (rawKey === "__name__") {
+      textToCopy = detail.name ? String(detail.name) : String(detail.id ?? "");
+    } else if (rawKey === "__id__") {
+      textToCopy = detail.id != null ? String(detail.id) : "";
+    } else {
+      const fields = detail.fields || {};
+      const v = fields[rawKey];
+      if (v == null) textToCopy = "";
+      else textToCopy = typeof v === "string" ? v : String(v);
+    }
+    if (!textToCopy) {
+      notify("Nothing to copy.", "info");
       return;
     }
-    const ok = await copyToClipboard(value);
-    notify(ok ? "Copied password to clipboard." : "Failed to copy password.", ok ? "success" : "error");
-  };
+    const ok = await copyToClipboard(textToCopy);
+    notify(ok ? "Copied to clipboard." : "Failed to copy.", ok ? "success" : "error");
+  });
   el("safeTotpBtn").onclick = async () => {
     if (!state.safe.selectedVaultId || !state.safe.selectedItemId) {
       notify("Select an item first.", "info");
@@ -1535,6 +1852,10 @@ function initUI() {
       closeSafeNoteModal();
       return;
     }
+    if (event.key === "Escape" && state.launcherContext.open) {
+      closeLauncherContextMenu();
+      return;
+    }
     if (event.key === "Enter" && state.textModal.open) {
       event.preventDefault();
       const value = el("textModalInput").value.trim();
@@ -1566,6 +1887,28 @@ function initUI() {
       console.error(error);
       notify(`Save failed: ${error.message}`, "error");
     });
+  };
+  el("crudIconTypeUnicode").addEventListener("change", () => {
+    el("crudIconUnicodeRow").classList.remove("hidden");
+    el("crudIconFileRow").classList.add("hidden");
+  });
+  el("crudIconTypeFile").addEventListener("change", () => {
+    el("crudIconUnicodeRow").classList.add("hidden");
+    el("crudIconFileRow").classList.remove("hidden");
+  });
+  el("crudPickIconFile").onclick = async () => {
+    try {
+      const result = await apiCall("pick_icon_file");
+      if (!result?.ok) throw new Error(result?.error || "File picker failed");
+      if (result.path) {
+        el("crudIconTypeFile").checked = true;
+        el("crudIconUnicodeRow").classList.add("hidden");
+        el("crudIconFileRow").classList.remove("hidden");
+        el("crudIconFile").value = result.path;
+      }
+    } catch (error) {
+      notify(`Failed to pick icon: ${error.message}`, "error");
+    }
   };
   el("textBackdrop").onclick = () => closeTextModal(null);
   el("textModalClose").onclick = () => closeTextModal(null);
@@ -1616,6 +1959,26 @@ function initUI() {
       notify(`Failed to update hotkey setting: ${error.message}`, "error");
     }
   });
+  el("safeLockPinSaveBtn").onclick = async () => {
+    const a = el("safeLockPinNew").value;
+    const b = el("safeLockPinConfirm").value;
+    if (a !== b) {
+      notify("PIN fields do not match.", "error");
+      return;
+    }
+    if (!a) {
+      notify("Enter and confirm a new PIN.", "error");
+      return;
+    }
+    try {
+      await apiCall("set_safe_lock_pin", a);
+      const settings = await apiCall("get_integration_settings");
+      updateSafeLockPinSettingsUI(settings);
+      notify("Safe PIN saved.", "success");
+    } catch (error) {
+      notify(`Failed to save PIN: ${error.message}`, "error");
+    }
+  };
   el("workspaceSettingsList").addEventListener("click", async (event) => {
     const iconBtn = event.target.closest("[data-edit-workspace-icon]");
     const renameBtn = event.target.closest("[data-rename-workspace]");
@@ -1633,8 +1996,8 @@ function initUI() {
     if (iconBtn) {
       const icon = await openTextModal({
         title: "Workspace Icon",
-        label: "Icon label (e.g. fa-folder, fa-code, Dev)",
-        value: workspace.icon || "fa-folder",
+        label: "Unicode character (e.g. 🖿 ⚙ ✦)",
+        value: resolveWorkspaceIcon(workspace.icon),
       });
       if (!icon) return;
       try {
@@ -1657,7 +2020,7 @@ function initUI() {
       });
       if (!name) return;
       try {
-        await apiCall("update_workspace", workspaceId, name, workspace.icon || "fa-folder");
+        await apiCall("update_workspace", workspaceId, name, workspace.icon || "🖿");
         state.workspaces = await apiCall("get_workspaces");
         if (workspaceId === state.activeWorkspaceId) await refreshSafePanel();
         renderWorkspaceTabs();
@@ -1678,7 +2041,7 @@ function initUI() {
       await apiCall("delete_workspace", workspaceId);
       state.workspaces = await apiCall("get_workspaces");
       if (!state.workspaces.length) {
-        const created = await apiCall("create_workspace", "Default", "fa-folder");
+        const created = await apiCall("create_workspace", "Default", "🖿");
         state.workspaces = await apiCall("get_workspaces");
         state.activeWorkspaceId = created.id;
       } else if (!state.workspaces.some((w) => w.id === state.activeWorkspaceId)) {
@@ -1703,11 +2066,11 @@ function initUI() {
     if (!name) return;
     const icon = await openTextModal({
       title: "Workspace Icon",
-      label: "Icon label (optional)",
-      value: "fa-folder",
+      label: "Unicode character (optional)",
+      value: "🖿",
     });
     try {
-      await apiCall("create_workspace", name, icon || "fa-folder");
+      await apiCall("create_workspace", name, icon || "🖿");
       state.workspaces = await apiCall("get_workspaces");
       state.activeWorkspaceId = state.workspaces[state.workspaces.length - 1].id;
       await loadWorkspaceData();
@@ -1767,6 +2130,7 @@ function initUI() {
   };
 
   el("appsList").addEventListener("click", async (event) => {
+    closeLauncherContextMenu();
     const toggleAppCategoryBtn = event.target.closest("[data-toggle-app-category]");
     if (toggleAppCategoryBtn) {
       const category = toggleAppCategoryBtn.dataset.toggleAppCategory;
@@ -1775,14 +2139,8 @@ function initUI() {
       return;
     }
     const launchBtn = event.target.closest("[data-launch-app]");
-    const editBtn = event.target.closest("[data-edit-app]");
-    const deleteBtn = event.target.closest("[data-delete-app]");
-    if (!launchBtn && !editBtn && !deleteBtn) return;
-
-    const sourceBtn = launchBtn || editBtn || deleteBtn;
-    const appId = Number(
-      sourceBtn.dataset.launchApp || sourceBtn.dataset.editApp || sourceBtn.dataset.deleteApp
-    );
+    if (!launchBtn) return;
+    const appId = Number(launchBtn.dataset.launchApp);
     if (!appId) return;
 
     const app = state.lastApps?.find((a) => a.id === appId);
@@ -1798,24 +2156,46 @@ function initUI() {
       return;
     }
 
-    if (deleteBtn) {
-      const ok = await openConfirmModal({
-        title: "Delete App",
-        message: `Delete app "${app.name}"?`,
-      });
-      if (!ok) return;
-      try {
-        await apiCall("delete_app", app.id);
-        await loadWorkspaceData();
-      } catch (error) {
-        console.error(error);
-        notify(`Failed to delete app: ${error.message}`, "error");
-      }
-      return;
-    }
-
-    openCrudModal("app", "edit", app);
   });
+  el("appsList").addEventListener("contextmenu", (event) => {
+    const tile = event.target.closest("[data-app-tile]");
+    if (!tile) return;
+    event.preventDefault();
+    const appId = Number(tile.dataset.appTile);
+    if (!appId) return;
+    openLauncherContextMenu(appId, event.clientX, event.clientY);
+  });
+  document.addEventListener("click", (event) => {
+    if (!state.launcherContext.open) return;
+    const menu = el("launcherContextMenu");
+    if (menu && menu.contains(event.target)) return;
+    closeLauncherContextMenu();
+  });
+  el("launcherContextEdit").onclick = () => {
+    const appId = Number(state.launcherContext.appId);
+    closeLauncherContextMenu();
+    const app = state.lastApps?.find((a) => a.id === appId);
+    if (!app) return;
+    openCrudModal("app", "edit", app);
+  };
+  el("launcherContextDelete").onclick = async () => {
+    const appId = Number(state.launcherContext.appId);
+    closeLauncherContextMenu();
+    const app = state.lastApps?.find((a) => a.id === appId);
+    if (!app) return;
+    const ok = await openConfirmModal({
+      title: "Delete App",
+      message: `Delete app "${app.name}"?`,
+    });
+    if (!ok) return;
+    try {
+      await apiCall("delete_app", app.id);
+      await loadWorkspaceData();
+    } catch (error) {
+      console.error(error);
+      notify(`Failed to delete app: ${error.message}`, "error");
+    }
+  };
 
   el("resourcesList").addEventListener("click", async (event) => {
     const toggleResourceCategoryBtn = event.target.closest("[data-toggle-resource-category]");
