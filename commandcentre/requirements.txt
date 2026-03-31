@@ -1,0 +1,6 @@
+pywebview
+pytest
+pillow
+pynput
+pystray
+

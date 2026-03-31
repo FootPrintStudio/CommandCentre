@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CommandCentre</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script defer src="./assets/js/app.js"></script>
+  </head>
+  <body class="bg-slate-950 text-slate-100 h-screen overflow-hidden">
+    <header class="border-b border-slate-800 p-3 flex items-center gap-2">
+      <div id="workspaceTabs" class="flex gap-2 overflow-x-auto"></div>
+      <button
+        id="newWorkspaceBtn"
+        class="ml-2 rounded bg-blue-600 px-3 py-1 text-sm hover:bg-blue-500"
+      >
+        + Workspace
+      </button>
+      <div class="ml-auto flex items-center gap-2">
+        <button id="openSettingsBtn" class="rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700">Settings</button>
+        <button id="openSearchBtn" class="rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700">Search</button>
+        <button id="showDashboard" class="rounded bg-slate-800 px-3 py-1 text-sm">Dashboard</button>
+        <button id="showKanban" class="rounded bg-slate-800 px-3 py-1 text-sm">Kanban</button>
+      </div>
+    </header>
+
+    <main class="p-4 h-[calc(100vh-64px)] overflow-hidden">
+      <section id="dashboardView" class="h-full overflow-hidden flex flex-col gap-3">
+        <div id="dashboardScrollable" class="flex-1 overflow-y-auto flex flex-col gap-3">
+          <div class="rounded border border-slate-800 p-3 flex flex-col bg-slate-950/95">
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="text-lg font-semibold">Launcher</h2>
+            <div class="flex items-center gap-2">
+              <button id="addAppBtn" class="rounded bg-emerald-700 px-2 py-1 text-xs hover:bg-emerald-600">+ App</button>
+              <button id="toggleLauncherBtn" class="rounded bg-slate-800 px-2 py-1 text-xs hover:bg-slate-700">Collapse</button>
+            </div>
+          </div>
+          <div id="launcherContent">
+            <div id="appsList" class="text-sm text-slate-300">No apps yet.</div>
+          </div>
+          </div>
+          <div class="rounded border border-slate-800 p-3 flex flex-col bg-slate-950/95">
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="text-lg font-semibold">Library</h2>
+            <div class="flex items-center gap-2">
+              <button id="addResourceBtn" class="rounded bg-emerald-700 px-2 py-1 text-xs hover:bg-emerald-600">+ Resource</button>
+              <button id="toggleLibraryBtn" class="rounded bg-slate-800 px-2 py-1 text-xs hover:bg-slate-700">Collapse</button>
+            </div>
+          </div>
+          <div id="libraryContent">
+            <div id="resourcesList" class="text-sm text-slate-300">No resources yet.</div>
+          </div>
+          </div>
+        </div>
+        <div class="rounded border border-slate-800 p-3 bg-slate-950/98 backdrop-blur">
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="text-lg font-semibold">Safe</h2>
+            <div class="flex items-center gap-2">
+                <button id="safeCreateNoteBtn" class="rounded bg-emerald-700 px-2 py-1 text-xs hover:bg-emerald-600">New Note</button>
+              <button id="safeRefreshBtn" class="rounded bg-slate-800 px-2 py-1 text-xs hover:bg-slate-700">Refresh</button>
+              <button id="toggleSafeBtn" class="rounded bg-slate-800 px-2 py-1 text-xs hover:bg-slate-700">Collapse</button>
+            </div>
+          </div>
+          <div id="safeContent">
+            <p id="safeStatus" class="text-xs text-slate-400 mb-2">Checking Proton Pass CLI status...</p>
+            <div id="safeContainer" class="rounded border border-slate-800 p-3 bg-slate-900 space-y-3">
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
+                <label class="text-xs block">
+                  <div class="text-slate-300 mb-1">Vault</div>
+                  <select id="safeVaultSelect" class="w-full rounded bg-slate-950 border border-slate-800 px-2 py-1 text-sm"></select>
+                </label>
+                <label class="text-xs block md:col-span-1">
+                  <div class="text-slate-300 mb-1">Search</div>
+                  <input id="safeItemSearch" class="w-full rounded bg-slate-950 border border-slate-800 px-2 py-1 text-sm" placeholder="Filter by title..." />
+                </label>
+                <label class="text-xs text-slate-300 flex items-center gap-2 md:justify-end pb-1">
+                  <input id="safeShowTrashed" type="checkbox" class="h-4 w-4 rounded border-slate-700 bg-slate-900" />
+                  Show trashed items
+                </label>
+              </div>
+              <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                <div class="min-h-[300px]">
+                  <div class="text-sm text-slate-300 mb-1">Items</div>
+                  <div id="safeItemsList" class="text-xs text-slate-300 h-[350px] overflow-y-auto space-y-1 rounded bg-slate-950 p-2"></div>
+                </div>
+                <div class="min-h-[300px]">
+                  <div class="flex items-center justify-between mb-1">
+                    <div class="text-sm text-slate-300">Item Details</div>
+                    <div class="flex items-center gap-2">
+                      <button id="safeCopyPrimaryBtn" class="rounded bg-slate-800 px-2 py-1 text-[10px] hover:bg-slate-700">Copy Login</button>
+                      <button id="safeCopyPasswordBtn" class="rounded bg-slate-800 px-2 py-1 text-[10px] hover:bg-slate-700">Copy Password</button>
+                      <button id="safeTotpBtn" class="rounded bg-slate-800 px-2 py-1 text-[10px] hover:bg-slate-700">Get TOTP</button>
+                      <button id="safeDeleteItemBtn" class="rounded bg-red-800 px-2 py-1 text-[10px] hover:bg-red-700">Delete Item</button>
+                    </div>
+                  </div>
+                  <div id="safeItemDetail" class="text-xs text-slate-300 h-[350px] overflow-y-auto rounded bg-slate-950 p-2">
+                    Select an item to load details.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="kanbanView" class="hidden">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-semibold">Kanban</h2>
+          <div class="flex items-center gap-2">
+            <button id="addColumnBtn" class="rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700">
+              + Column
+            </button>
+            <button id="addTaskBtn" class="rounded bg-emerald-700 px-3 py-1 text-sm hover:bg-emerald-600">
+              + Task
+            </button>
+          </div>
+        </div>
+        <div id="kanbanColumns" class="grid grid-cols-1 md:grid-cols-3 gap-3"></div>
+      </section>
+    </main>
+
+    <div id="modalRoot" class="hidden fixed inset-0 z-50">
+      <div id="modalBackdrop" class="absolute inset-0 bg-black/60"></div>
+      <div class="absolute inset-0 flex items-center justify-center p-4">
+        <div class="w-full max-w-3xl rounded-lg border border-slate-800 bg-slate-950 shadow-xl">
+          <div class="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+            <div class="text-sm text-slate-300" id="modalTitle">Task</div>
+            <button id="modalClose" class="rounded px-2 py-1 text-slate-300 hover:bg-slate-900">Esc</button>
+          </div>
+          <div class="p-4 space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label class="text-sm">
+                <div class="text-slate-300 mb-1">Title</div>
+                <input id="taskTitle" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
+              </label>
+              <label class="text-sm">
+                <div class="text-slate-300 mb-1">Priority</div>
+                <select id="taskPriority" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2">
+                  <option value="low">Low</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="high">High</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </label>
+            </div>
+
+            <label class="text-sm block">
+              <div class="flex items-center justify-between mb-1">
+                <div class="text-slate-300">Description (Markdown)</div>
+                <div class="flex gap-2">
+                  <button id="mdEdit" class="rounded bg-slate-800 px-2 py-1 text-xs">Edit</button>
+                  <button id="mdPreview" class="rounded bg-slate-800 px-2 py-1 text-xs">Preview</button>
+                </div>
+              </div>
+              <textarea id="taskDescription" rows="8" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2 font-mono text-sm"></textarea>
+              <div id="taskDescriptionPreview" class="hidden prose prose-invert max-w-none rounded bg-slate-900 border border-slate-800 px-3 py-2 text-sm"></div>
+            </label>
+
+            <label class="text-sm block">
+              <div class="text-slate-300 mb-1">Labels (comma-separated)</div>
+              <input id="taskLabels" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" placeholder="backend, urgent, research" />
+            </label>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <label class="text-sm block">
+                <div class="text-slate-300 mb-1">Linked Apps</div>
+                <select id="taskAppIds" multiple class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2 h-28"></select>
+              </label>
+              <label class="text-sm block">
+                <div class="text-slate-300 mb-1">Linked Resources</div>
+                <select id="taskResourceIds" multiple class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2 h-28"></select>
+              </label>
+              <label class="text-sm block">
+                <div class="text-slate-300 mb-1">Blocking Tasks</div>
+                <select id="taskBlockingIds" multiple class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2 h-28"></select>
+                <div id="taskBlockingQuickLinks" class="mt-2 flex flex-wrap gap-1"></div>
+              </label>
+            </div>
+
+            <div class="flex items-center justify-end gap-2 pt-2">
+              <button id="taskDelete" class="rounded bg-red-700 px-3 py-2 text-sm hover:bg-red-600">Delete</button>
+              <button id="taskCancel" class="rounded bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700">Cancel</button>
+              <button id="taskSave" class="rounded bg-emerald-700 px-3 py-2 text-sm hover:bg-emerald-600">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="searchModalRoot" class="hidden fixed inset-0 z-50">
+      <div id="searchBackdrop" class="absolute inset-0 bg-black/60"></div>
+      <div class="absolute inset-0 flex items-start justify-center p-6">
+        <div class="w-full max-w-2xl rounded-lg border border-slate-800 bg-slate-950 shadow-xl">
+          <div class="border-b border-slate-800 p-3">
+            <input
+              id="searchInput"
+              class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2 text-sm"
+              placeholder="Search workspaces, tasks, apps, resources..."
+            />
+            <div class="mt-1 text-xs text-slate-400">Shortcut: Super+K (or Ctrl+K)</div>
+          </div>
+          <div id="searchResults" class="max-h-[60vh] overflow-y-auto p-2 text-sm text-slate-200">
+            <div class="text-slate-400 px-2 py-2">Type to search...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="crudModalRoot" class="hidden fixed inset-0 z-50">
+      <div id="crudBackdrop" class="absolute inset-0 bg-black/60"></div>
+      <div class="absolute inset-0 flex items-center justify-center p-4">
+        <div class="w-full max-w-xl rounded-lg border border-slate-800 bg-slate-950 shadow-xl">
+          <div class="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+            <div id="crudModalTitle" class="text-sm text-slate-300">Item</div>
+            <button id="crudModalClose" class="rounded px-2 py-1 text-slate-300 hover:bg-slate-900">Esc</button>
+          </div>
+          <div class="p-4 space-y-3">
+            <label class="text-sm block">
+              <div class="text-slate-300 mb-1">Name</div>
+              <input id="crudName" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
+            </label>
+            <label id="crudCommandRow" class="text-sm block">
+              <div class="text-slate-300 mb-1">Command / Path</div>
+              <input id="crudCommand" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
+            </label>
+            <label id="crudTypeRow" class="text-sm block hidden">
+              <div class="text-slate-300 mb-1">Type</div>
+              <select id="crudType" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2">
+                <option value="file">file</option>
+                <option value="web">web</option>
+              </select>
+            </label>
+            <label id="crudPathRow" class="text-sm block hidden">
+              <div class="text-slate-300 mb-1">Path / URL</div>
+              <input id="crudPath" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
+            </label>
+            <label class="text-sm block">
+              <div class="text-slate-300 mb-1">Category</div>
+              <input id="crudCategory" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
+            </label>
+            <label id="crudDescriptionRow" class="text-sm block hidden">
+              <div class="text-slate-300 mb-1">Description</div>
+              <textarea id="crudDescription" rows="3" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2"></textarea>
+            </label>
+            <div class="flex items-center justify-end gap-2 pt-2">
+              <button id="crudCancel" class="rounded bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700">Cancel</button>
+              <button id="crudSave" class="rounded bg-emerald-700 px-3 py-2 text-sm hover:bg-emerald-600">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="textModalRoot" class="hidden fixed inset-0 z-50">
+      <div id="textBackdrop" class="absolute inset-0 bg-black/60"></div>
+      <div class="absolute inset-0 flex items-center justify-center p-4">
+        <div class="w-full max-w-md rounded-lg border border-slate-800 bg-slate-950 shadow-xl">
+          <div class="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+            <div id="textModalTitle" class="text-sm text-slate-300">Input</div>
+            <button id="textModalClose" class="rounded px-2 py-1 text-slate-300 hover:bg-slate-900">Esc</button>
+          </div>
+          <div class="p-4 space-y-3">
+            <label class="text-sm block">
+              <div id="textModalLabel" class="text-slate-300 mb-1">Value</div>
+              <input id="textModalInput" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
+            </label>
+            <div class="flex items-center justify-end gap-2 pt-1">
+              <button id="textCancel" class="rounded bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700">Cancel</button>
+              <button id="textSave" class="rounded bg-emerald-700 px-3 py-2 text-sm hover:bg-emerald-600">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="confirmModalRoot" class="hidden fixed inset-0 z-50">
+      <div id="confirmBackdrop" class="absolute inset-0 bg-black/60"></div>
+      <div class="absolute inset-0 flex items-center justify-center p-4">
+        <div class="w-full max-w-md rounded-lg border border-slate-800 bg-slate-950 shadow-xl">
+          <div class="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+            <div id="confirmModalTitle" class="text-sm text-slate-300">Confirm</div>
+            <button id="confirmModalClose" class="rounded px-2 py-1 text-slate-300 hover:bg-slate-900">Esc</button>
+          </div>
+          <div class="p-4 space-y-3">
+            <p id="confirmModalMessage" class="text-sm text-slate-200"></p>
+            <div class="flex items-center justify-end gap-2 pt-1">
+              <button id="confirmCancel" class="rounded bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700">Cancel</button>
+              <button id="confirmOk" class="rounded bg-red-700 px-3 py-2 text-sm hover:bg-red-600">Confirm</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="safeNoteModalRoot" class="hidden fixed inset-0 z-50">
+      <div id="safeNoteBackdrop" class="absolute inset-0 bg-black/60"></div>
+      <div class="absolute inset-0 flex items-center justify-center p-4">
+        <div class="w-full max-w-xl rounded-lg border border-slate-800 bg-slate-950 shadow-xl">
+          <div class="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+            <div id="safeNoteModalTitle" class="text-sm text-slate-300">Create Secure Note</div>
+            <button id="safeNoteClose" class="rounded px-2 py-1 text-slate-300 hover:bg-slate-900">Esc</button>
+          </div>
+          <div class="p-4 space-y-3">
+            <label class="text-sm block">
+              <div class="text-slate-300 mb-1">Title</div>
+              <input id="safeNoteTitle" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
+            </label>
+            <label class="text-sm block">
+              <div class="text-slate-300 mb-1">Note content</div>
+              <textarea id="safeNoteContent" rows="8" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2 font-mono text-sm"></textarea>
+            </label>
+            <div class="flex items-center justify-end gap-2">
+              <button id="safeNoteCancel" class="rounded bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700">Cancel</button>
+              <button id="safeNoteSave" class="rounded bg-emerald-700 px-3 py-2 text-sm hover:bg-emerald-600">Create</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="settingsModalRoot" class="hidden fixed inset-0 z-50">
+      <div id="settingsBackdrop" class="absolute inset-0 bg-black/60"></div>
+      <div class="absolute inset-0 flex items-center justify-center p-4">
+        <div class="w-full max-w-2xl rounded-lg border border-slate-800 bg-slate-950 shadow-xl">
+          <div class="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+            <div class="text-sm text-slate-300">Settings</div>
+            <button id="settingsClose" class="rounded px-2 py-1 text-slate-300 hover:bg-slate-900">Esc</button>
+          </div>
+          <div class="p-4 space-y-5">
+            <div class="rounded border border-slate-800 p-3">
+              <label class="flex items-center justify-between gap-3">
+                <span class="text-sm text-slate-200">Launch CommandCentre on startup</span>
+                <input id="autostartToggle" type="checkbox" class="h-4 w-4 rounded border-slate-700 bg-slate-900" />
+              </label>
+            </div>
+            <div class="rounded border border-slate-800 p-3 space-y-3">
+              <div class="text-sm text-slate-300">Integrations</div>
+              <label class="flex items-center justify-between gap-3">
+                <span class="text-sm text-slate-200">Enable system tray icon</span>
+                <input id="trayToggle" type="checkbox" class="h-4 w-4 rounded border-slate-700 bg-slate-900" />
+              </label>
+              <label class="flex items-center justify-between gap-3">
+                <span class="text-sm text-slate-200">Enable global search hotkey (<span class="font-mono">Super+K</span>)</span>
+                <input id="hotkeyToggle" type="checkbox" class="h-4 w-4 rounded border-slate-700 bg-slate-900" />
+              </label>
+            </div>
+            <div class="rounded border border-slate-800 p-3">
+              <div class="flex items-center justify-between mb-2">
+                <div class="text-sm text-slate-300">Proton Pass CLI</div>
+                <div class="flex items-center gap-2">
+                  <button id="safeLoginBtn" class="rounded bg-emerald-700 px-2 py-1 text-xs hover:bg-emerald-600">Login</button>
+                  <button id="safeLogoutBtn" class="rounded bg-slate-800 px-2 py-1 text-xs hover:bg-slate-700">Logout</button>
+                  <button id="safeStatusRefreshBtn" class="rounded bg-slate-800 px-2 py-1 text-xs hover:bg-slate-700">Refresh</button>
+                  <button id="safeDebugBtn" class="rounded bg-slate-800 px-2 py-1 text-xs hover:bg-slate-700">Debug</button>
+                </div>
+              </div>
+              <div id="safeSettingsStatus" class="text-xs text-slate-400">Checking status...</div>
+            </div>
+            <div class="rounded border border-slate-800 p-3">
+              <div class="text-sm text-slate-300 mb-2">Workspaces</div>
+              <div id="workspaceSettingsList" class="space-y-2 text-sm"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="toastRoot" class="fixed bottom-4 right-4 z-[60] flex max-w-sm flex-col gap-2"></div>
+  </body>
+</html>
+
