@@ -77,6 +77,7 @@ def initialize_database() -> None:
     with get_connection() as conn:
         conn.executescript(SCHEMA_SQL)
         _ensure_apps_icon_columns(conn)
+        _ensure_kanban_columns_is_done(conn)
         workspace_count = conn.execute("SELECT COUNT(*) AS count FROM workspaces").fetchone()["count"]
         if workspace_count == 0:
             cursor = conn.execute(
@@ -85,11 +86,11 @@ def initialize_database() -> None:
             )
             workspace_id = cursor.lastrowid
             conn.executemany(
-                "INSERT INTO kanban_columns(workspace_id, name, sort_order) VALUES (?, ?, ?)",
+                "INSERT INTO kanban_columns(workspace_id, name, sort_order, is_done) VALUES (?, ?, ?, ?)",
                 [
-                    (workspace_id, "To Do", 0),
-                    (workspace_id, "In Progress", 1),
-                    (workspace_id, "Done", 2),
+                    (workspace_id, "To Do", 0, 0),
+                    (workspace_id, "In Progress", 1, 0),
+                    (workspace_id, "Done", 2, 1),
                 ],
             )
         conn.commit()
@@ -101,6 +102,15 @@ def _ensure_apps_icon_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE apps ADD COLUMN icon_type TEXT DEFAULT 'unicode'")
     if "icon_value" not in cols:
         conn.execute("ALTER TABLE apps ADD COLUMN icon_value TEXT")
+
+
+def _ensure_kanban_columns_is_done(conn: sqlite3.Connection) -> None:
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(kanban_columns)").fetchall()}
+    if "is_done" not in cols:
+        conn.execute("ALTER TABLE kanban_columns ADD COLUMN is_done INTEGER NOT NULL DEFAULT 0")
+        conn.execute(
+            "UPDATE kanban_columns SET is_done = 1 WHERE lower(trim(name)) = 'done'",
+        )
 
 
 @contextmanager

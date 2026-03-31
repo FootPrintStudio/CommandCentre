@@ -18,11 +18,11 @@ class CommandCentreAPI:
             )
             workspace_id = cursor.lastrowid
             conn.executemany(
-                "INSERT INTO kanban_columns(workspace_id, name, sort_order) VALUES (?, ?, ?)",
+                "INSERT INTO kanban_columns(workspace_id, name, sort_order, is_done) VALUES (?, ?, ?, ?)",
                 [
-                    (workspace_id, "To Do", 0),
-                    (workspace_id, "In Progress", 1),
-                    (workspace_id, "Done", 2),
+                    (workspace_id, "To Do", 0, 0),
+                    (workspace_id, "In Progress", 1, 0),
+                    (workspace_id, "Done", 2, 1),
                 ],
             )
             conn.commit()
@@ -142,21 +142,57 @@ class CommandCentreAPI:
                 (workspace_id,),
             ).fetchall()
 
-    def create_column(self, workspace_id, name, sort_order=0):
+    def create_column(self, workspace_id, name, sort_order=0, is_done=False):
+        normalized_done = bool(is_done)
         with get_connection() as conn:
+            if normalized_done:
+                conn.execute(
+                    "UPDATE kanban_columns SET is_done = 0 WHERE workspace_id = ?",
+                    (workspace_id,),
+                )
             cursor = conn.execute(
-                "INSERT INTO kanban_columns(workspace_id, name, sort_order) VALUES (?, ?, ?)",
-                (workspace_id, name, sort_order),
+                """
+                INSERT INTO kanban_columns(workspace_id, name, sort_order, is_done)
+                VALUES (?, ?, ?, ?)
+                """,
+                (workspace_id, name, sort_order, 1 if normalized_done else 0),
             )
             conn.commit()
             return {"id": cursor.lastrowid}
 
-    def update_column(self, column_id, name, sort_order=0):
+    def update_column(self, column_id, name, sort_order=0, is_done=None):
+        """
+        is_done: True/False sets the done column (only one per workspace; clears others).
+        None = leave is_done unchanged (name/sort_order only).
+        """
         with get_connection() as conn:
-            conn.execute(
-                "UPDATE kanban_columns SET name = ?, sort_order = ? WHERE id = ?",
-                (name, sort_order, column_id),
-            )
+            row = conn.execute(
+                "SELECT workspace_id FROM kanban_columns WHERE id = ?",
+                (column_id,),
+            ).fetchone()
+            if not row:
+                return {"ok": False, "error": "Column not found"}
+            workspace_id = row["workspace_id"]
+            if is_done is None:
+                conn.execute(
+                    "UPDATE kanban_columns SET name = ?, sort_order = ? WHERE id = ?",
+                    (name, sort_order, column_id),
+                )
+            else:
+                normalized = bool(is_done)
+                if normalized:
+                    conn.execute(
+                        "UPDATE kanban_columns SET is_done = 0 WHERE workspace_id = ? AND id != ?",
+                        (workspace_id, column_id),
+                    )
+                conn.execute(
+                    """
+                    UPDATE kanban_columns
+                    SET name = ?, sort_order = ?, is_done = ?
+                    WHERE id = ?
+                    """,
+                    (name, sort_order, 1 if normalized else 0, column_id),
+                )
             conn.commit()
         return {"ok": True}
 
@@ -369,5 +405,5 @@ class CommandCentreAPI:
                 ("1" if normalized else "0",),
             )
             conn.commit()
-        return system.set_hotkey_enabled(normalized, "Super+K")
+        return system.set_hotkey_enabled(normalized, "Ctrl+K")
 

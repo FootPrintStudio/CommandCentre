@@ -29,6 +29,10 @@ const state = {
     open: false,
     resolver: null,
   },
+  columnEdit: {
+    open: false,
+    columnId: null,
+  },
   safeNoteModal: {
     open: false,
   },
@@ -397,6 +401,171 @@ function renderDashboard(apps, resources) {
         </div>`;
 }
 
+function parseTaskLabelsForCard(task) {
+  if (Array.isArray(task.labels)) return task.labels;
+  return safeJsonParse(task.labels || "[]", []);
+}
+
+function configureMarkedParser() {
+  if (!window.marked || window.marked.__ccConfigured) return;
+  try {
+    if (typeof window.marked.setOptions === "function") {
+      window.marked.setOptions({
+        gfm: true,
+        headerIds: false,
+        mangle: false,
+      });
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  window.marked.__ccConfigured = true;
+}
+
+function renderTaskCardMarkdownHtml(md) {
+  const raw = String(md || "").trim();
+  if (!raw) return "";
+  configureMarkedParser();
+  if (window.marked) {
+    return window.marked.parse(raw);
+  }
+  return `<p class="whitespace-pre-wrap">${escapeHtml(raw)}</p>`;
+}
+
+function buildKanbanTaskCardHtml(task, doneColumnId) {
+  const blocked = isTaskBlocked(task, doneColumnId);
+  const borderClass = blocked
+    ? "bg-amber-950/30 border-amber-700/60"
+    : "bg-slate-800 border-slate-700/40";
+
+  const labels = parseTaskLabelsForCard(task);
+  const appIds = toIdArray(task.app_ids);
+  const resourceIds = toIdArray(task.resource_ids);
+  const apps = appIds
+    .map((id) => state.lastApps?.find((a) => a.id === id))
+    .filter(Boolean);
+  const resources = resourceIds
+    .map((id) => state.lastResources?.find((r) => r.id === id))
+    .filter(Boolean);
+
+  const mdRaw = (task.description_md || "").trim();
+  const mdBlock = mdRaw
+    ? `<div class="max-h-40 overflow-auto rounded border border-slate-700/40 bg-slate-950/35 px-2 py-1.5"><div class="task-card-md">${renderTaskCardMarkdownHtml(
+        task.description_md || ""
+      )}</div></div>`
+    : "";
+
+  const appsBlock =
+    apps.length > 0
+      ? `<div class="space-y-0.5">
+          <div class="text-[10px] font-medium uppercase tracking-wide text-slate-500">Apps</div>
+          <ul class="list-none space-y-0.5 text-[11px]">
+            ${apps
+              .map(
+                (a) =>
+                  `<li class="min-w-0">
+              <button type="button" class="task-card-launch-app max-w-full truncate text-left text-sky-300 hover:text-sky-200 hover:underline" data-task-card-app-id="${a.id}">${escapeHtml(a.name)}</button>
+            </li>`
+              )
+              .join("")}
+          </ul>
+        </div>`
+      : "";
+
+  const resourcesBlock =
+    resources.length > 0
+      ? `<div class="space-y-0.5">
+          <div class="text-[10px] font-medium uppercase tracking-wide text-slate-500">Resources</div>
+          <ul class="list-none space-y-0.5 text-[11px]">
+            ${resources
+              .map(
+                (r) =>
+                  `<li class="min-w-0">
+              <button type="button" class="task-card-open-resource max-w-full truncate text-left text-emerald-300 hover:text-emerald-200 hover:underline" data-task-card-resource-id="${r.id}">${escapeHtml(r.name)}</button>
+            </li>`
+              )
+              .join("")}
+          </ul>
+        </div>`
+      : "";
+
+  const blockingIds = getBlockingTaskIds(task);
+  let blockingBlock = "";
+  if (blockingIds.length) {
+    const rows = blockingIds
+      .map((bid) => {
+        const bt = state.tasks.find((t) => t.id === bid);
+        const title = escapeHtml(bt?.title || `Task #${bid}`);
+        const resolved = Boolean(bt && doneColumnId && bt.column_id === doneColumnId);
+        const cls = resolved
+          ? "border-slate-600 text-slate-500 line-through"
+          : "border-amber-700/60 text-amber-200 hover:bg-amber-950/40";
+        return `<li class="min-w-0">
+            <button type="button" class="task-card-blocker-link max-w-full truncate rounded border px-1.5 py-0.5 text-left text-[11px] ${cls}" data-blocker-id="${bid}">
+              ${resolved ? "✓ " : ""}${title}
+            </button>
+          </li>`;
+      })
+      .join("");
+    const incomplete = getIncompleteBlockingTasks(task, doneColumnId).length;
+    const statusLine =
+      incomplete > 0
+        ? `<div class="text-[10px] text-amber-300">Blocked (${incomplete} remaining)</div>`
+        : `<div class="text-[10px] text-slate-500">Dependencies satisfied</div>`;
+    blockingBlock = `<div class="space-y-1 border-t border-slate-700/50 pt-1.5">
+        <div class="text-[10px] font-medium uppercase tracking-wide text-slate-500">Blocking</div>
+        ${statusLine}
+        <ul class="list-none space-y-1">${rows}</ul>
+      </div>`;
+  }
+
+  const labelsInner =
+    labels.length > 0
+      ? labels
+          .map(
+            (lb) =>
+              `<span class="rounded border border-slate-600 px-1.5 py-0.5 text-[10px] text-slate-300">${escapeHtml(
+                String(lb)
+              )}</span>`
+          )
+          .join("")
+      : "";
+  const labelsBlock = labelsInner
+    ? `<div class="flex flex-wrap gap-1 border-t border-slate-700/50 pt-1.5">${labelsInner}</div>`
+    : "";
+
+  return `
+    <div
+      class="group flex flex-col gap-1.5 rounded border ${borderClass} p-2 text-sm cursor-grab active:cursor-grabbing"
+      draggable="true"
+      data-task-card="true"
+      data-task-id="${task.id}"
+    >
+      <div class="flex items-start justify-between gap-2">
+        <div class="min-w-0 flex-1 space-y-1.5">
+          <div class="cursor-pointer space-y-1.5" data-open-task="${task.id}">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="rounded border px-1.5 py-0.5 text-[10px] ${priorityBadgeClass(task.priority)}">
+                ${(task.priority || "medium").toUpperCase()}
+              </span>
+              <span class="font-medium leading-snug text-slate-100">${escapeHtml(task.title || "")}</span>
+            </div>
+            ${mdBlock}
+          </div>
+          ${appsBlock}
+          ${resourcesBlock}
+        </div>
+        <div class="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <button type="button" data-open-task="${task.id}" class="text-xs text-slate-300 hover:text-white">Edit</button>
+          <button type="button" data-delete-task="${task.id}" class="text-xs text-red-300 hover:text-red-200">Delete</button>
+        </div>
+      </div>
+      ${blockingBlock}
+      ${labelsBlock ? `<div class="cursor-pointer" data-open-task="${task.id}">${labelsBlock}</div>` : ""}
+    </div>
+  `;
+}
+
 function renderKanban() {
   const root = el("kanbanColumns");
   root.innerHTML = "";
@@ -404,71 +573,74 @@ function renderKanban() {
   state.columns.forEach((column, index) => {
     const tasks = state.tasks.filter((task) => task.column_id === column.id);
     const col = document.createElement("div");
-    col.className = "rounded border border-slate-800 p-3 bg-slate-900";
+    col.className =
+      "rounded border border-slate-800 p-3 bg-slate-900 min-w-[min(100%,20rem)] flex-1 basis-80 max-w-full";
     col.dataset.columnId = String(column.id);
     col.dataset.columnCard = "true";
     col.innerHTML = `
-      <div class="flex items-center justify-between mb-2">
-        <h3 class="font-semibold">${column.name}</h3>
-        <div class="flex items-center gap-1">
-          <button class="text-xs text-slate-400 hover:text-slate-200" data-drag-column="${column.id}" title="Drag to reorder">↕</button>
+      <div class="flex items-center justify-between gap-2 mb-2">
+        <div class="flex min-w-0 flex-1 items-center gap-2">
+          <button class="shrink-0 text-base leading-none text-slate-400 hover:text-slate-200" data-drag-column="${column.id}" title="Drag to reorder">⇆</button>
+          <h3 class="truncate font-semibold">${column.name}${
+            columnIsDoneColumn(column)
+              ? ' <span class="whitespace-nowrap text-xs font-normal text-emerald-400">(done)</span>'
+              : ""
+          }</h3>
+        </div>
+        <div class="flex shrink-0 items-center gap-1">
           <button class="text-xs text-slate-400 hover:text-slate-200" data-move-column-left="${column.id}" ${
             index === 0 ? "disabled" : ""
-          }>◀</button>
+          }>⇇</button>
           <button class="text-xs text-slate-400 hover:text-slate-200" data-move-column-right="${column.id}" ${
             index === state.columns.length - 1 ? "disabled" : ""
-          }>▶</button>
-          <button class="text-xs text-slate-400 hover:text-slate-200" data-rename-column="${column.id}">Rename</button>
+          }>⇉</button>
+          <button class="text-xs text-slate-400 hover:text-slate-200" data-edit-column="${column.id}">Edit</button>
           <button class="text-xs text-red-300 hover:text-red-200" data-delete-column="${column.id}">Delete</button>
         </div>
       </div>
       <div class="space-y-2 min-h-12" data-dropzone="true">
         ${
           tasks.length
-            ? tasks
-                .map(
-                  (task) => `
-                    <div
-                      class="rounded border ${
-                        isTaskBlocked(task, doneColumnId)
-                          ? "bg-amber-950/30 border-amber-700/60"
-                          : "bg-slate-800 border-slate-700/40"
-                      } p-2 text-sm flex items-center justify-between cursor-grab active:cursor-grabbing group"
-                      draggable="true"
-                      data-task-card="true"
-                      data-task-id="${task.id}"
-                    >
-                      <button class="text-left flex-1 pr-2 hover:text-slate-50" data-open-task="${task.id}">
-                        <div class="flex items-center gap-2 min-w-0">
-                          <span class="inline-block h-2 w-2 rounded-full ${
-                            isTaskBlocked(task, doneColumnId) ? "bg-amber-400" : "bg-emerald-400"
-                          }"></span>
-                          <span class="truncate">${task.title}</span>
-                        </div>
-                        <div class="mt-1 flex items-center gap-1">
-                          <span class="rounded border px-1.5 py-0.5 text-[10px] ${priorityBadgeClass(task.priority)}">
-                            ${(task.priority || "medium").toUpperCase()}
-                          </span>
-                        </div>
-                      </button>
-                      ${
-                        isTaskBlocked(task, doneColumnId)
-                          ? `<span class="text-[10px] text-amber-300 mr-2">Blocked (${getIncompleteBlockingTasks(task, doneColumnId).length})</span>`
-                          : ""
-                      }
-                      <div class="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                        <button data-open-task="${task.id}" class="text-xs text-slate-300 hover:text-white">Edit</button>
-                        <button data-delete-task="${task.id}" class="text-xs text-red-300 hover:text-red-200">Delete</button>
-                      </div>
-                    </div>
-                  `
-                )
-                .join("")
+            ? tasks.map((task) => buildKanbanTaskCardHtml(task, doneColumnId)).join("")
             : `<div class="text-sm text-slate-400">No tasks</div>`
         }
       </div>
     `;
     root.appendChild(col);
+  });
+
+  root.querySelectorAll(".task-card-blocker-link").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const id = Number(btn.dataset.blockerId);
+      if (id) openTaskModal(id);
+    });
+  });
+
+  root.querySelectorAll(".task-card-launch-app").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const appId = Number(btn.dataset.taskCardAppId);
+      const app = state.lastApps?.find((a) => a.id === appId);
+      if (!app) return;
+      apiCall("launch_app", app.command_path).catch((error) => {
+        console.error(error);
+        notify(`Failed to launch app: ${error.message}`, "error");
+      });
+    });
+  });
+
+  root.querySelectorAll(".task-card-open-resource").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const resId = Number(btn.dataset.taskCardResourceId);
+      const resource = state.lastResources?.find((r) => r.id === resId);
+      if (!resource) return;
+      apiCall("open_resource", resource.path, resource.type).catch((error) => {
+        console.error(error);
+        notify(`Failed to open resource: ${error.message}`, "error");
+      });
+    });
   });
 
   root.querySelectorAll("[data-task-card='true']").forEach((card) => {
@@ -599,20 +771,11 @@ function renderKanban() {
     });
   });
 
-  root.querySelectorAll("[data-rename-column]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const columnId = Number(btn.dataset.renameColumn);
-      const column = state.columns.find((c) => c.id === columnId);
-      if (!column) return;
-      const name = await openTextModal({
-        title: "Rename Column",
-        label: "New column name",
-        value: column.name,
-      });
-      if (!name) return;
-      await apiCall("update_column", columnId, name, column.sort_order || 0);
-      await loadWorkspaceData();
-      renderKanban();
+  root.querySelectorAll("[data-edit-column]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const columnId = Number(btn.dataset.editColumn);
+      if (!columnId) return;
+      openColumnEditModal(columnId);
     });
   });
 
@@ -901,12 +1064,68 @@ function safeJsonParse(value, fallback) {
 }
 
 function getDoneColumnId() {
-  const done = state.columns.find((c) => c.name?.trim().toLowerCase() === "done");
-  return done ? done.id : null;
+  const flagged = state.columns.find((c) => c.is_done === 1 || c.is_done === true);
+  if (flagged) return flagged.id;
+  const legacy = state.columns.find((c) => c.name?.trim().toLowerCase() === "done");
+  return legacy ? legacy.id : null;
 }
 
-function getSelectedIds(selectId) {
-  return Array.from(el(selectId).selectedOptions).map((option) => Number(option.value));
+function columnIsDoneColumn(column) {
+  if (!column) return false;
+  if (column.is_done === 1 || column.is_done === true) return true;
+  return column.name?.trim().toLowerCase() === "done";
+}
+
+function openColumnEditModal(columnId) {
+  const column = state.columns.find((c) => c.id === columnId);
+  if (!column) return;
+  state.columnEdit.open = true;
+  state.columnEdit.columnId = columnId;
+  el("columnEditName").value = column.name || "";
+  el("columnEditIsDone").checked = columnIsDoneColumn(column);
+  el("columnEditModalRoot").classList.remove("hidden");
+  el("columnEditName").focus();
+}
+
+function closeColumnEditModal() {
+  state.columnEdit.open = false;
+  state.columnEdit.columnId = null;
+  el("columnEditModalRoot").classList.add("hidden");
+}
+
+async function saveColumnEditModal() {
+  const columnId = state.columnEdit.columnId;
+  if (!columnId) return;
+  const column = state.columns.find((c) => c.id === columnId);
+  if (!column) return;
+  const name = el("columnEditName").value.trim();
+  if (!name) {
+    notify("Column name is required.", "error");
+    return;
+  }
+  const isDone = Boolean(el("columnEditIsDone").checked);
+  try {
+    await apiCall("update_column", columnId, name, column.sort_order ?? 0, isDone);
+    closeColumnEditModal();
+    await loadWorkspaceData();
+    renderKanban();
+    notify("Column updated.", "success");
+  } catch (error) {
+    notify(`Failed to update column: ${error.message}`, "error");
+  }
+}
+
+function getSelectedIds(elementId) {
+  const node = el(elementId);
+  if (!node) return [];
+  if (node.tagName === "SELECT" && node.multiple) {
+    return Array.from(node.selectedOptions)
+      .map((option) => Number(option.value))
+      .filter((id) => Number.isFinite(id));
+  }
+  return Array.from(node.querySelectorAll('input[type="checkbox"]:checked'))
+    .map((input) => Number(input.value))
+    .filter((id) => Number.isFinite(id));
 }
 
 function toIdArray(value) {
@@ -937,16 +1156,24 @@ function priorityBadgeClass(priority) {
   return "bg-slate-800 text-slate-200 border-slate-700";
 }
 
-function populateMultiSelect(selectId, options, selectedIds) {
+function populateTaskModalCheckboxGroup(containerId, options, selectedIds, getLabel) {
   const selectedSet = new Set(selectedIds.map((id) => Number(id)));
-  const select = el(selectId);
-  select.innerHTML = options
-    .map(
-      (option) =>
-        `<option value="${option.id}" ${selectedSet.has(Number(option.id)) ? "selected" : ""}>${
-          option.name || option.title || `#${option.id}`
-        }</option>`
-    )
+  const root = el(containerId);
+  if (!root) return;
+  if (!options.length) {
+    root.innerHTML = `<div class="px-1 py-0.5 text-xs text-slate-500">None available.</div>`;
+    return;
+  }
+  root.innerHTML = options
+    .map((opt) => {
+      const id = Number(opt.id);
+      const label = escapeHtml(String(getLabel(opt)));
+      const checked = selectedSet.has(id) ? "checked" : "";
+      return `<label class="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-slate-800/80">
+        <input type="checkbox" value="${id}" class="mt-0.5 shrink-0 rounded border-slate-600 bg-slate-900 text-sky-500 focus:ring-sky-500/40" ${checked} />
+        <span class="min-w-0 flex-1 truncate text-xs text-slate-200">${label}</span>
+      </label>`;
+    })
     .join("");
 }
 
@@ -1163,6 +1390,7 @@ function setMdMode(mode) {
   el("taskDescriptionPreview").classList.toggle("hidden", mode !== "preview");
   if (mode === "preview") {
     const md = el("taskDescription").value || "";
+    configureMarkedParser();
     const html = window.marked ? window.marked.parse(md) : md;
     el("taskDescriptionPreview").innerHTML = html;
   }
@@ -1183,12 +1411,23 @@ function openTaskModal(taskId) {
     ? task.labels
     : safeJsonParse(task.labels || "[]", []);
   el("taskLabels").value = labels.join(", ");
-  populateMultiSelect("taskAppIds", state.lastApps || [], toIdArray(task.app_ids));
-  populateMultiSelect("taskResourceIds", state.lastResources || [], toIdArray(task.resource_ids));
-  populateMultiSelect(
+  populateTaskModalCheckboxGroup(
+    "taskAppIds",
+    state.lastApps || [],
+    toIdArray(task.app_ids),
+    (a) => a.name || `#${a.id}`
+  );
+  populateTaskModalCheckboxGroup(
+    "taskResourceIds",
+    state.lastResources || [],
+    toIdArray(task.resource_ids),
+    (r) => r.name || `#${r.id}`
+  );
+  populateTaskModalCheckboxGroup(
     "taskBlockingIds",
     state.tasks.filter((candidate) => candidate.id !== task.id),
-    toIdArray(task.blocking_task_ids)
+    toIdArray(task.blocking_task_ids),
+    (t) => t.title || `#${t.id}`
   );
   renderBlockingQuickLinks(task);
 
@@ -1836,6 +2075,10 @@ function initUI() {
       closeCrudModal();
       return;
     }
+    if (event.key === "Escape" && state.columnEdit.open) {
+      closeColumnEditModal();
+      return;
+    }
     if (event.key === "Escape" && state.textModal.open) {
       closeTextModal(null);
       return;
@@ -1886,6 +2129,14 @@ function initUI() {
     saveCrudModal().catch((error) => {
       console.error(error);
       notify(`Save failed: ${error.message}`, "error");
+    });
+  };
+  el("columnEditBackdrop").onclick = closeColumnEditModal;
+  el("columnEditClose").onclick = closeColumnEditModal;
+  el("columnEditCancel").onclick = closeColumnEditModal;
+  el("columnEditSave").onclick = () => {
+    saveColumnEditModal().catch((error) => {
+      console.error(error);
     });
   };
   el("crudIconTypeUnicode").addEventListener("change", () => {

@@ -32,3 +32,19 @@ def test_app_crud_supports_icon_fields():
     assert row["icon_type"] == "unicode"
     assert row["icon_value"] == "🗎"
 
+
+def test_kanban_done_column_flag_single_workspace():
+    initialize_database()
+    api = CommandCentreAPI()
+    workspace_id = api.create_workspace("Kanban Done", "🖿")["id"]
+    cols = api.get_kanban_columns(workspace_id)
+    done_col = next(c for c in cols if c["name"] == "Done")
+    todo_col = next(c for c in cols if c["name"] == "To Do")
+    assert done_col.get("is_done") == 1
+    assert todo_col.get("is_done") == 0
+    api.update_column(todo_col["id"], "To Do", todo_col.get("sort_order") or 0, True)
+    cols2 = api.get_kanban_columns(workspace_id)
+    by_id = {c["id"]: c for c in cols2}
+    assert by_id[todo_col["id"]]["is_done"] == 1
+    assert by_id[done_col["id"]]["is_done"] == 0
+

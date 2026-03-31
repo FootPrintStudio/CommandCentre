@@ -6,6 +6,7 @@ import subprocess
 import base64
 import mimetypes
 import webbrowser
+from threading import Thread
 
 import webview
 from .db import get_connection
@@ -17,6 +18,19 @@ except Exception:  # noqa: BLE001
     pystray = None
     Image = None
     ImageDraw = None
+
+if pystray is not None:
+
+    class _DaemonTrayIcon(pystray.Icon):
+        """pystray's default ``run_detached`` uses a non-daemon thread; the process will not
+        exit on quit until that thread ends. Use a daemon thread so closing the last window
+        can shut down cleanly after integrations are stopped."""
+
+        def _run_detached(self) -> None:
+            Thread(target=lambda: self.run(), daemon=True).start()
+
+else:
+    _DaemonTrayIcon = None  # type: ignore[misc, assignment]
 
 try:
     from pynput import keyboard as pynput_keyboard
@@ -664,8 +678,33 @@ def open_safe_panel(workspace_id: int) -> dict:
     return {"ok": True, "reused": False}
 
 
+def _on_main_window_closing():
+    """If the tray is enabled, hide the window instead of destroying it so it can be restored from the tray."""
+    if not _get_setting_bool("tray_enabled", True):
+        return True
+    win = RUNTIME.get("main_window")
+    if win is None:
+        return True
+
+    def _hide() -> None:
+        try:
+            win.hide()
+        except Exception:  # noqa: BLE001
+            pass
+
+    Thread(target=_hide, daemon=True).start()
+    return False
+
+
+def _on_main_window_closed() -> None:
+    """Ensure global hotkey and tray are torn down when the main window is destroyed."""
+    stop_integrations()
+
+
 def configure_runtime(main_window) -> None:
     RUNTIME["main_window"] = main_window
+    main_window.events.closing += _on_main_window_closing
+    main_window.events.closed += _on_main_window_closed
 
 
 def _open_search_modal() -> None:
@@ -674,7 +713,13 @@ def _open_search_modal() -> None:
         return
     try:
         window.show()
-        window.restore()
+        # restore() exits maximized state on Qt when the window is not minimized; only restore
+        # from minimized so Ctrl+K / global search does not un-maximize a focused window.
+        try:
+            if window.minimized:
+                window.restore()
+        except Exception:  # noqa: BLE001
+            pass
         window.bring_to_front()
     except Exception:  # noqa: BLE001
         pass
@@ -691,7 +736,11 @@ def _restore_main_window(icon=None, item=None) -> None:
         return
     try:
         window.show()
-        window.restore()
+        try:
+            if window.minimized:
+                window.restore()
+        except Exception:  # noqa: BLE001
+            pass
         window.bring_to_front()
     except Exception:  # noqa: BLE001
         pass
@@ -769,7 +818,7 @@ def read_icon_file(path: str) -> dict:
 
 
 def _start_tray() -> dict:
-    if pystray is None:
+    if pystray is None or _DaemonTrayIcon is None:
         return {"ok": False, "warning": "pystray/Pillow not installed; tray disabled."}
     if RUNTIME.get("tray_icon") is not None:
         return {"ok": True, "message": "Tray already running."}
@@ -779,12 +828,18 @@ def _start_tray() -> dict:
         return {"ok": False, "warning": "Could not build tray icon image."}
 
     menu = pystray.Menu(
-        pystray.MenuItem("Restore", _restore_main_window),
-        pystray.MenuItem("Hide", _hide_main_window),
-        pystray.MenuItem("Open Search", lambda icon, item: _open_search_modal()),
-        pystray.MenuItem("Quit", _quit_app),
+        pystray.MenuItem("Show / Restore window", _restore_main_window, default=True),
+        pystray.MenuItem("Hide window", _hide_main_window),
+        pystray.MenuItem("Open search", lambda icon, item: _open_search_modal()),
+        pystray.MenuItem("Quit CommandCentre", _quit_app),
     )
-    tray_icon = pystray.Icon("commandcentre", icon_image, "CommandCentre", menu)
+    tray_icon = _DaemonTrayIcon(
+        "commandcentre",
+        icon_image,
+        # X11 WM_NAME / pystray uses latin-1 for the icon title; keep ASCII only.
+        "CommandCentre - right-click for menu (Show, Search, Quit)",
+        menu,
+    )
     tray_icon.run_detached()
     RUNTIME["tray_icon"] = tray_icon
     return {"ok": True}
@@ -878,7 +933,7 @@ def get_integration_settings() -> dict:
     return {
         "tray_enabled": _get_setting_bool("tray_enabled", True),
         "hotkey_enabled": _get_setting_bool("hotkey_enabled", True),
-        "hotkey_combo": "Super+K",
+        "hotkey_combo": "Ctrl+K",
         "safe_lock_pin_is_custom": _get_safe_lock_pin_stored() is not None,
     }
 
@@ -906,7 +961,7 @@ def set_tray_enabled(enabled: bool) -> dict:
     return _stop_tray()
 
 
-def set_hotkey_enabled(enabled: bool, key_combo: str = "Super+K") -> dict:
+def set_hotkey_enabled(enabled: bool, key_combo: str = "Ctrl+K") -> dict:
     if enabled:
         return register_hotkey(key_combo, "open_search")
     return _stop_hotkey()
