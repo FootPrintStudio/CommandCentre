@@ -47,7 +47,7 @@ Core organizational unit. Each workspace represents a distinct project, hobby, o
 ### System Integration
 
 - **Autostart:** `.desktop` file in `~/.config/autostart/`
-- **Global Hotkey:** `Super+K` opens fuzzy search modal (workspaces, tasks, apps).
+- **Global Hotkey:** `ctrl+K` opens fuzzy search modal (workspaces, tasks, apps).
 - **System Tray:** Minimize to tray, quick restore.
 
 ---

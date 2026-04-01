@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=CommandCentre
+Comment=Workspace dashboard, Kanban, and launcher
+Exec=commandcentre %u
+Icon=commandcentre
+Terminal=false
+Categories=Utility;Office;
+StartupWMClass=commandcentre

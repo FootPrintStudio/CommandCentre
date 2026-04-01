@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS apps (
   command_path TEXT NOT NULL,
   category TEXT DEFAULT 'Uncategorized',
   icon_type TEXT DEFAULT 'unicode',
-  icon_value TEXT
+  icon_value TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS resources (
@@ -31,7 +32,8 @@ CREATE TABLE IF NOT EXISTS resources (
   path TEXT,
   type TEXT CHECK(type IN ('file', 'web')),
   category TEXT DEFAULT 'Uncategorized',
-  description TEXT
+  description TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS kanban_columns (
@@ -51,7 +53,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   labels TEXT,
   blocking_task_ids TEXT,
   app_ids TEXT,
-  resource_ids TEXT
+  resource_ids TEXT,
+  due_date TEXT,
+  recurrence TEXT DEFAULT 'none'
 );
 
 CREATE TABLE IF NOT EXISTS workspace_safe_prefs (
@@ -65,6 +69,16 @@ CREATE TABLE IF NOT EXISTS app_settings (
   value TEXT,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS global_tray_apps (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  command_path TEXT NOT NULL,
+  category TEXT DEFAULT 'Uncategorized',
+  icon_type TEXT DEFAULT 'unicode',
+  icon_value TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -77,7 +91,10 @@ def initialize_database() -> None:
     with get_connection() as conn:
         conn.executescript(SCHEMA_SQL)
         _ensure_apps_icon_columns(conn)
+        _ensure_apps_resources_sort_order(conn)
         _ensure_kanban_columns_is_done(conn)
+        _ensure_tasks_due_recurrence(conn)
+        _ensure_global_tray_apps_table(conn)
         workspace_count = conn.execute("SELECT COUNT(*) AS count FROM workspaces").fetchone()["count"]
         if workspace_count == 0:
             cursor = conn.execute(
@@ -104,6 +121,63 @@ def _ensure_apps_icon_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE apps ADD COLUMN icon_value TEXT")
 
 
+def _ensure_apps_resources_sort_order(conn: sqlite3.Connection) -> None:
+    apps_cols = {row["name"] for row in conn.execute("PRAGMA table_info(apps)").fetchall()}
+    apps_added = False
+    if "sort_order" not in apps_cols:
+        conn.execute("ALTER TABLE apps ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+        apps_added = True
+    res_cols = {row["name"] for row in conn.execute("PRAGMA table_info(resources)").fetchall()}
+    res_added = False
+    if "sort_order" not in res_cols:
+        conn.execute("ALTER TABLE resources ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+        res_added = True
+
+    if apps_added:
+        rows = conn.execute(
+            "SELECT id, workspace_id, category FROM apps ORDER BY workspace_id, category COLLATE NOCASE, id"
+        ).fetchall()
+        current_key = None
+        order = 0
+        for r in rows:
+            key = (r["workspace_id"], r["category"] or "Uncategorized")
+            if key != current_key:
+                current_key = key
+                order = 0
+            conn.execute("UPDATE apps SET sort_order = ? WHERE id = ?", (order, r["id"]))
+            order += 1
+
+    if res_added:
+        rows = conn.execute(
+            "SELECT id, workspace_id, category FROM resources ORDER BY workspace_id, category COLLATE NOCASE, id"
+        ).fetchall()
+        current_key = None
+        order = 0
+        for r in rows:
+            key = (r["workspace_id"], r["category"] or "Uncategorized")
+            if key != current_key:
+                current_key = key
+                order = 0
+            conn.execute("UPDATE resources SET sort_order = ? WHERE id = ?", (order, r["id"]))
+            order += 1
+
+
+def _ensure_global_tray_apps_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS global_tray_apps (
+          id INTEGER PRIMARY KEY,
+          name TEXT NOT NULL,
+          command_path TEXT NOT NULL,
+          category TEXT DEFAULT 'Uncategorized',
+          icon_type TEXT DEFAULT 'unicode',
+          icon_value TEXT,
+          sort_order INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+
+
 def _ensure_kanban_columns_is_done(conn: sqlite3.Connection) -> None:
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(kanban_columns)").fetchall()}
     if "is_done" not in cols:
@@ -111,6 +185,14 @@ def _ensure_kanban_columns_is_done(conn: sqlite3.Connection) -> None:
         conn.execute(
             "UPDATE kanban_columns SET is_done = 1 WHERE lower(trim(name)) = 'done'",
         )
+
+
+def _ensure_tasks_due_recurrence(conn: sqlite3.Connection) -> None:
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+    if "due_date" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN due_date TEXT")
+    if "recurrence" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN recurrence TEXT DEFAULT 'none'")
 
 
 @contextmanager

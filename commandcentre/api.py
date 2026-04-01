@@ -1,5 +1,40 @@
+import re
+
 from .db import get_connection
 from . import system
+
+
+def _next_app_sort_order(conn, workspace_id, category):
+    row = conn.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM apps WHERE workspace_id = ? AND category = ?",
+        (workspace_id, category),
+    ).fetchone()
+    return int(row["n"] if row and row["n"] is not None else 0)
+
+
+def _next_resource_sort_order(conn, workspace_id, category):
+    row = conn.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM resources WHERE workspace_id = ? AND category = ?",
+        (workspace_id, category),
+    ).fetchone()
+    return int(row["n"] if row and row["n"] is not None else 0)
+
+
+_TASK_RECURRENCE = frozenset({"none", "daily", "weekly", "monthly", "annually"})
+
+
+def _normalize_task_recurrence(value):
+    s = (value or "none").strip().lower()
+    return s if s in _TASK_RECURRENCE else "none"
+
+
+def _normalize_due_date(value):
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    return s if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s) else None
 
 
 class CommandCentreAPI:
@@ -46,7 +81,10 @@ class CommandCentreAPI:
     def get_apps(self, workspace_id):
         with get_connection() as conn:
             return conn.execute(
-                "SELECT * FROM apps WHERE workspace_id = ? ORDER BY id",
+                """
+                SELECT * FROM apps WHERE workspace_id = ?
+                ORDER BY category COLLATE NOCASE, sort_order, id
+                """,
                 (workspace_id,),
             ).fetchall()
 
@@ -60,12 +98,15 @@ class CommandCentreAPI:
         icon_value="",
     ):
         with get_connection() as conn:
+            sort_order = _next_app_sort_order(conn, workspace_id, category)
             cursor = conn.execute(
                 """
-                INSERT INTO apps(workspace_id, name, command_path, category, icon_type, icon_value)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO apps(
+                    workspace_id, name, command_path, category, icon_type, icon_value, sort_order
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (workspace_id, name, command_path, category, icon_type, icon_value),
+                (workspace_id, name, command_path, category, icon_type, icon_value, sort_order),
             )
             conn.commit()
             return {"id": cursor.lastrowid}
@@ -80,14 +121,35 @@ class CommandCentreAPI:
         icon_value="",
     ):
         with get_connection() as conn:
-            conn.execute(
-                """
-                UPDATE apps
-                SET name = ?, command_path = ?, category = ?, icon_type = ?, icon_value = ?
-                WHERE id = ?
-                """,
-                (name, command_path, category, icon_type, icon_value, app_id),
-            )
+            cur = conn.execute(
+                "SELECT workspace_id, category FROM apps WHERE id = ?",
+                (app_id,),
+            ).fetchone()
+            if not cur:
+                return {"ok": False, "error": "App not found"}
+            ws = cur["workspace_id"]
+            old_cat = cur["category"] or "Uncategorized"
+            new_cat = category or "Uncategorized"
+            if new_cat != old_cat:
+                sort_order = _next_app_sort_order(conn, ws, new_cat)
+                conn.execute(
+                    """
+                    UPDATE apps
+                    SET name = ?, command_path = ?, category = ?, icon_type = ?, icon_value = ?,
+                        sort_order = ?
+                    WHERE id = ?
+                    """,
+                    (name, command_path, category, icon_type, icon_value, sort_order, app_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE apps
+                    SET name = ?, command_path = ?, category = ?, icon_type = ?, icon_value = ?
+                    WHERE id = ?
+                    """,
+                    (name, command_path, category, icon_type, icon_value, app_id),
+                )
             conn.commit()
         return {"ok": True}
 
@@ -97,41 +159,175 @@ class CommandCentreAPI:
             conn.commit()
         return {"ok": True}
 
+    def get_global_tray_apps(self):
+        with get_connection() as conn:
+            return conn.execute(
+                "SELECT * FROM global_tray_apps ORDER BY sort_order, id"
+            ).fetchall()
+
+    def create_global_tray_app(
+        self,
+        name,
+        command_path,
+        category="Uncategorized",
+        icon_type="unicode",
+        icon_value="",
+    ):
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM global_tray_apps"
+            ).fetchone()
+            sort_order = int(row["n"] if row and row["n"] is not None else 0)
+            cursor = conn.execute(
+                """
+                INSERT INTO global_tray_apps(
+                    name, command_path, category, icon_type, icon_value, sort_order
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (name, command_path, category, icon_type, icon_value, sort_order),
+            )
+            conn.commit()
+            return {"id": cursor.lastrowid}
+
+    def update_global_tray_app(
+        self,
+        app_id,
+        name,
+        command_path,
+        category="Uncategorized",
+        icon_type="unicode",
+        icon_value="",
+    ):
+        with get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE global_tray_apps
+                SET name = ?, command_path = ?, category = ?, icon_type = ?, icon_value = ?
+                WHERE id = ?
+                """,
+                (name, command_path, category, icon_type, icon_value, app_id),
+            )
+            conn.commit()
+        return {"ok": True}
+
+    def delete_global_tray_app(self, app_id):
+        with get_connection() as conn:
+            conn.execute("DELETE FROM global_tray_apps WHERE id = ?", (app_id,))
+            conn.commit()
+        return {"ok": True}
+
+    def reorder_global_tray_apps(self, ordered_ids):
+        ids = list(ordered_ids or [])
+        with get_connection() as conn:
+            existing = {row["id"] for row in conn.execute("SELECT id FROM global_tray_apps").fetchall()}
+            if set(ids) != existing or len(ids) != len(existing):
+                return {"ok": False, "error": "ordered_ids must list each universal tray app exactly once"}
+            for i, app_id in enumerate(ids):
+                conn.execute(
+                    "UPDATE global_tray_apps SET sort_order = ? WHERE id = ?",
+                    (i, app_id),
+                )
+            conn.commit()
+        return {"ok": True}
+
+    def reorder_apps_in_category(self, workspace_id, category, ordered_ids):
+        ids = list(ordered_ids or [])
+        with get_connection() as conn:
+            rows = conn.execute(
+                "SELECT id FROM apps WHERE workspace_id = ? AND category = ? ORDER BY sort_order, id",
+                (workspace_id, category),
+            ).fetchall()
+            existing = [r["id"] for r in rows]
+            if sorted(ids) != sorted(existing):
+                return {"ok": False, "error": "invalid order for workspace category"}
+            for i, app_id in enumerate(ids):
+                conn.execute("UPDATE apps SET sort_order = ? WHERE id = ?", (i, app_id))
+            conn.commit()
+        return {"ok": True}
+
     def get_resources(self, workspace_id):
         with get_connection() as conn:
             return conn.execute(
-                "SELECT * FROM resources WHERE workspace_id = ? ORDER BY id",
+                """
+                SELECT * FROM resources WHERE workspace_id = ?
+                ORDER BY category COLLATE NOCASE, sort_order, id
+                """,
                 (workspace_id,),
             ).fetchall()
 
     def create_resource(self, workspace_id, name, path, resource_type, category="Uncategorized", description=""):
         with get_connection() as conn:
+            sort_order = _next_resource_sort_order(conn, workspace_id, category)
             cursor = conn.execute(
                 """
-                INSERT INTO resources(workspace_id, name, path, type, category, description)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO resources(
+                    workspace_id, name, path, type, category, description, sort_order
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (workspace_id, name, path, resource_type, category, description),
+                (workspace_id, name, path, resource_type, category, description, sort_order),
             )
             conn.commit()
             return {"id": cursor.lastrowid}
 
     def update_resource(self, resource_id, name, path, resource_type, category="Uncategorized", description=""):
         with get_connection() as conn:
-            conn.execute(
-                """
-                UPDATE resources
-                SET name = ?, path = ?, type = ?, category = ?, description = ?
-                WHERE id = ?
-                """,
-                (name, path, resource_type, category, description, resource_id),
-            )
+            cur = conn.execute(
+                "SELECT workspace_id, category FROM resources WHERE id = ?",
+                (resource_id,),
+            ).fetchone()
+            if not cur:
+                return {"ok": False, "error": "Resource not found"}
+            ws = cur["workspace_id"]
+            old_cat = cur["category"] or "Uncategorized"
+            new_cat = category or "Uncategorized"
+            if new_cat != old_cat:
+                sort_order = _next_resource_sort_order(conn, ws, new_cat)
+                conn.execute(
+                    """
+                    UPDATE resources
+                    SET name = ?, path = ?, type = ?, category = ?, description = ?, sort_order = ?
+                    WHERE id = ?
+                    """,
+                    (name, path, resource_type, category, description, sort_order, resource_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE resources
+                    SET name = ?, path = ?, type = ?, category = ?, description = ?
+                    WHERE id = ?
+                    """,
+                    (name, path, resource_type, category, description, resource_id),
+                )
             conn.commit()
         return {"ok": True}
 
     def delete_resource(self, resource_id):
         with get_connection() as conn:
             conn.execute("DELETE FROM resources WHERE id = ?", (resource_id,))
+            conn.commit()
+        return {"ok": True}
+
+    def reorder_resources_in_category(self, workspace_id, category, ordered_ids):
+        ids = list(ordered_ids or [])
+        with get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT id FROM resources WHERE workspace_id = ? AND category = ?
+                ORDER BY sort_order, id
+                """,
+                (workspace_id, category),
+            ).fetchall()
+            existing = [r["id"] for r in rows]
+            if sorted(ids) != sorted(existing):
+                return {"ok": False, "error": "invalid order for workspace category"}
+            for i, resource_id in enumerate(ids):
+                conn.execute(
+                    "UPDATE resources SET sort_order = ? WHERE id = ?",
+                    (i, resource_id),
+                )
             conn.commit()
         return {"ok": True}
 
@@ -220,14 +416,19 @@ class CommandCentreAPI:
         blocking_task_ids="[]",
         app_ids="[]",
         resource_ids="[]",
+        due_date=None,
+        recurrence="none",
     ):
+        due = _normalize_due_date(due_date)
+        rec = _normalize_task_recurrence(recurrence)
         with get_connection() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO tasks(
                     workspace_id, column_id, title, description_md, priority,
-                    labels, blocking_task_ids, app_ids, resource_ids
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    labels, blocking_task_ids, app_ids, resource_ids,
+                    due_date, recurrence
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workspace_id,
@@ -239,6 +440,8 @@ class CommandCentreAPI:
                     blocking_task_ids,
                     app_ids,
                     resource_ids,
+                    due,
+                    rec,
                 ),
             )
             conn.commit()
@@ -255,13 +458,18 @@ class CommandCentreAPI:
         blocking_task_ids="[]",
         app_ids="[]",
         resource_ids="[]",
+        due_date=None,
+        recurrence="none",
     ):
+        due = _normalize_due_date(due_date)
+        rec = _normalize_task_recurrence(recurrence)
         with get_connection() as conn:
             conn.execute(
                 """
                 UPDATE tasks
                 SET column_id = ?, title = ?, description_md = ?, priority = ?,
-                    labels = ?, blocking_task_ids = ?, app_ids = ?, resource_ids = ?
+                    labels = ?, blocking_task_ids = ?, app_ids = ?, resource_ids = ?,
+                    due_date = ?, recurrence = ?
                 WHERE id = ?
                 """,
                 (
@@ -273,6 +481,8 @@ class CommandCentreAPI:
                     blocking_task_ids,
                     app_ids,
                     resource_ids,
+                    due,
+                    rec,
                     task_id,
                 ),
             )

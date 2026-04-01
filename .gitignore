@@ -1,4 +1,9 @@
 .venv/
+.venv-appimage/
+build/
+dist/
+packaging/.build/
+packaging/.tools/
 .pytest_cache/
 __pycache__/
 *.pyc

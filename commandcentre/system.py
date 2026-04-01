@@ -1,8 +1,9 @@
-import os
 import json
+import os
 import re
 import shutil
 import subprocess
+import sys
 import base64
 import mimetypes
 import webbrowser
@@ -44,6 +45,99 @@ RUNTIME = {
     "tray_icon": None,
     "hotkey_listener": None,
 }
+
+MAIN_WINDOW_LAYOUT_KEY = "main_window_layout"
+
+
+def _validate_main_window_layout(data: dict) -> dict | None:
+    try:
+        x = int(data["x"])
+        y = int(data["y"])
+        w = max(400, min(10000, int(data["width"])))
+        h = max(300, min(10000, int(data["height"])))
+        maximized = bool(data.get("maximized", False))
+        return {"x": x, "y": y, "width": w, "height": h, "maximized": maximized}
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def load_main_window_layout() -> dict | None:
+    """Restore previous position, size, and maximized flag from app_settings (if any)."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?",
+            (MAIN_WINDOW_LAYOUT_KEY,),
+        ).fetchone()
+    if not row:
+        return None
+    raw = row.get("value")
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        data = json.loads(str(raw))
+        if not isinstance(data, dict):
+            return None
+        return _validate_main_window_layout(data)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+
+
+def _snapshot_main_window_layout(window) -> dict | None:
+    if window is None:
+        return None
+    uid = getattr(window, "uid", None)
+    if uid and sys.platform.startswith("linux"):
+        try:
+            from webview.platforms import qt as qt_platform
+
+            browser = qt_platform.BrowserView.instances.get(uid)
+            if browser is not None:
+                maximized = bool(browser.isMaximized())
+                if maximized:
+                    ng = browser.normalGeometry()
+                    x, y, w, h = ng.x(), ng.y(), ng.width(), ng.height()
+                else:
+                    geo = browser.geometry()
+                    x, y, w, h = geo.x(), geo.y(), geo.width(), geo.height()
+                return _validate_main_window_layout(
+                    {
+                        "x": x,
+                        "y": y,
+                        "width": w,
+                        "height": h,
+                        "maximized": maximized,
+                    }
+                )
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        x, y = window.x, window.y
+        w, h = window.width, window.height
+        return _validate_main_window_layout(
+            {"x": x, "y": y, "width": w, "height": h, "maximized": False}
+        )
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def persist_main_window_layout() -> None:
+    """Write current main window geometry (including maximized + normalGeometry when maximized)."""
+    snap = _snapshot_main_window_layout(RUNTIME.get("main_window"))
+    if not snap:
+        return
+    try:
+        with get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO app_settings(key, value, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+                """,
+                (MAIN_WINDOW_LAYOUT_KEY, json.dumps(snap)),
+            )
+            conn.commit()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _run_pass_cli(args: list[str]) -> tuple[bool, str, str]:
@@ -680,6 +774,7 @@ def open_safe_panel(workspace_id: int) -> dict:
 
 def _on_main_window_closing():
     """If the tray is enabled, hide the window instead of destroying it so it can be restored from the tray."""
+    persist_main_window_layout()
     if not _get_setting_bool("tray_enabled", True):
         return True
     win = RUNTIME.get("main_window")

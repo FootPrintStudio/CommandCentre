@@ -39,7 +39,10 @@ const state = {
   launcherContext: {
     open: false,
     appId: null,
+    /** "workspace" | "global_tray" */
+    scope: "workspace",
   },
+  globalTrayApps: [],
   settings: {
     open: false,
     autostartEnabled: false,
@@ -202,7 +205,7 @@ async function switchWorkspace(workspaceId) {
   renderWorkspaceTabs();
   try {
     await loadWorkspaceData();
-    await refreshSafePanel();
+    await applyWorkspaceSafePreference();
     return true;
   } catch (error) {
     notify(`Workspace switch failed: ${error.message}`, "error");
@@ -220,6 +223,154 @@ function groupByCategory(items) {
     acc[key].push(item);
     return acc;
   }, {});
+}
+
+/** Insert sourceId before targetId in a copy of ids; returns null if unchanged or invalid. */
+function reorderIdList(ids, sourceId, targetId) {
+  if (sourceId === targetId) return null;
+  const from = ids.indexOf(sourceId);
+  const to = ids.indexOf(targetId);
+  if (from === -1 || to === -1) return null;
+  const next = ids.filter((id) => id !== sourceId);
+  const insertAt = next.indexOf(targetId);
+  next.splice(insertAt, 0, sourceId);
+  return next;
+}
+
+const DASHBOARD_CLOCK_MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+function ordinalDayLabel(day) {
+  const n = Number(day);
+  const j = n % 10;
+  const k = n % 100;
+  if (k >= 11 && k <= 13) return `${n}th`;
+  if (j === 1) return `${n}st`;
+  if (j === 2) return `${n}nd`;
+  if (j === 3) return `${n}rd`;
+  return `${n}th`;
+}
+
+function updateDashboardClock() {
+  const node = el("dashboardClock");
+  if (!node) return;
+  const d = new Date();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  const day = ordinalDayLabel(d.getDate());
+  const mon = DASHBOARD_CLOCK_MONTHS[d.getMonth()];
+  const y = d.getFullYear();
+  node.textContent = `${hh}:${mm}:${ss} | ${day} ${mon}, ${y}`;
+  node.dateTime = d.toISOString();
+}
+
+function startDashboardClock() {
+  updateDashboardClock();
+  window.setInterval(updateDashboardClock, 1000);
+}
+
+function parseISODateParts(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || "").trim());
+  if (!m) return null;
+  return { y: +m[1], mo: +m[2] - 1, d: +m[3] };
+}
+
+function normalizeTaskRecurrence(r) {
+  const s = String(r || "none").toLowerCase();
+  return ["none", "daily", "weekly", "monthly", "annually"].includes(s) ? s : "none";
+}
+
+function daysInMonthForTask(year, monthIndex) {
+  return new Date(year, monthIndex + 1, 0).getDate();
+}
+
+function isTaskDueToday(task) {
+  const rec = normalizeTaskRecurrence(task.recurrence);
+  const parts = parseISODateParts(task.due_date);
+  const now = new Date();
+  const Y = now.getFullYear();
+  const M = now.getMonth();
+  const D = now.getDate();
+
+  if (rec === "none") {
+    if (!parts) return false;
+    return parts.y === Y && parts.mo === M && parts.d === D;
+  }
+  if (rec === "daily") {
+    return true;
+  }
+  if (rec === "weekly") {
+    if (!parts) return false;
+    const anchor = new Date(parts.y, parts.mo, parts.d);
+    return anchor.getDay() === now.getDay();
+  }
+  if (rec === "monthly") {
+    if (!parts) return false;
+    const dim = daysInMonthForTask(Y, M);
+    const targetDay = Math.min(parts.d, dim);
+    return D === targetDay;
+  }
+  if (rec === "annually") {
+    if (!parts) return false;
+    return M === parts.mo && D === parts.d;
+  }
+  return false;
+}
+
+function formatTaskDueCardLine(task) {
+  const rec = normalizeTaskRecurrence(task.recurrence);
+  const parts = parseISODateParts(task.due_date);
+
+  if (rec === "daily") {
+    if (parts) {
+      return `${ordinalDayLabel(parts.d)} ${DASHBOARD_CLOCK_MONTHS[parts.mo]}, ${parts.y} · Daily`;
+    }
+    return "Daily";
+  }
+  if (!parts) return "";
+  const dateStr = `${ordinalDayLabel(parts.d)} ${DASHBOARD_CLOCK_MONTHS[parts.mo]}, ${parts.y}`;
+  if (!rec || rec === "none") return dateStr;
+  const rw = { weekly: "Weekly", monthly: "Monthly", annually: "Annually" }[rec];
+  return rw ? `${dateStr} · ${rw}` : dateStr;
+}
+
+/** Lower = higher priority (critical first). */
+function taskPrioritySortRank(priority) {
+  const p = String(priority || "medium").toLowerCase();
+  if (p === "critical") return 0;
+  if (p === "high") return 1;
+  if (p === "medium") return 2;
+  if (p === "low") return 3;
+  return 2;
+}
+
+/** Order: priority → undated before dated → due date ascending → title. */
+function sortTasksForKanbanColumn(tasks) {
+  return [...tasks].sort((a, b) => {
+    const pr = taskPrioritySortRank(a.priority) - taskPrioritySortRank(b.priority);
+    if (pr !== 0) return pr;
+    const aHas = parseISODateParts(a.due_date) !== null;
+    const bHas = parseISODateParts(b.due_date) !== null;
+    if (aHas !== bHas) return aHas ? 1 : -1;
+    if (aHas && bHas) {
+      const dc = String(a.due_date).localeCompare(String(b.due_date));
+      if (dc !== 0) return dc;
+    }
+    return String(a.title || "").localeCompare(String(b.title || ""), undefined, { sensitivity: "base" });
+  });
 }
 
 function escapeHtml(value) {
@@ -319,6 +470,33 @@ function renderDashboard(apps, resources) {
     );
   }
 
+  const globalTrayRoot = el("globalTrayAppsRow");
+  const gTray = state.globalTrayApps || [];
+  if (globalTrayRoot) {
+    globalTrayRoot.innerHTML =
+      gTray.length === 0
+        ? `<span class="text-sm text-slate-400 shrink-0">No universal apps yet. Use + App to add one.</span>`
+        : gTray
+            .map(
+              (app) => `
+            <div class="group relative flex w-14 shrink-0 cursor-grab flex-col items-center gap-0.5 pt-0.5 active:cursor-grabbing" data-global-tray-tile="${app.id}" title="${escapeHtml(app.name)} — drag to reorder">
+              <button
+                type="button"
+                data-launch-global-tray-app="${app.id}"
+                class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-600 bg-gradient-to-b from-slate-700 to-slate-800 text-lg shadow transition hover:border-violet-500/60 hover:from-slate-600 hover:to-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+                title="${escapeHtml(app.name)}"
+              >
+                ${getAppTileIconHtml(app)}
+              </button>
+              <span class="line-clamp-2 w-full min-w-0 select-none px-0.5 text-center text-[10px] leading-tight text-slate-300">${escapeHtml(
+                app.name
+              )}</span>
+            </div>
+          `
+            )
+            .join("");
+  }
+
   const appsList = el("appsList");
   const appsByCat = groupByCategory(apps);
   appsList.innerHTML =
@@ -332,11 +510,11 @@ function renderDashboard(apps, resources) {
               <button class="w-full text-left text-xs uppercase tracking-wide text-slate-400 mb-1.5 hover:text-slate-200" data-toggle-app-category="${category}">
                 ${state.dashboard.appCategoriesCollapsed[category] ? "▸" : "▾"} ${category}
               </button>
-              <div class="grid grid-cols-[repeat(auto-fit,minmax(4rem,1fr))] gap-x-1 gap-y-2 ${state.dashboard.appCategoriesCollapsed[category] ? "hidden" : ""}">
+              <div class="grid grid-cols-[repeat(auto-fit,minmax(4rem,1fr))] items-start gap-x-1 gap-y-2 ${state.dashboard.appCategoriesCollapsed[category] ? "hidden" : ""}">
                 ${items
                   .map(
                     (app) => `
-                    <div class="group relative flex min-w-0 flex-col items-center gap-1 pt-0.5" data-app-tile="${app.id}">
+                    <div class="group relative flex min-w-0 cursor-grab flex-col items-center gap-1 pt-0.5 active:cursor-grabbing" data-app-tile="${app.id}" data-app-category="${escapeHtml(category)}" title="${escapeHtml(app.name)} — drag to reorder">
                       <button
                         type="button"
                         data-launch-app="${app.id}"
@@ -376,7 +554,7 @@ function renderDashboard(apps, resources) {
                 ${items
                   .map(
                     (res) => `
-                    <div class="flex items-center justify-between rounded bg-slate-900 px-2 py-1">
+                    <div class="flex cursor-grab items-center justify-between rounded bg-slate-900 px-2 py-1 active:cursor-grabbing" data-resource-row="${res.id}" data-resource-category="${escapeHtml(category)}" title="${escapeHtml(res.name)} — drag to reorder">
                       <button class="text-left flex-1 min-w-0 hover:text-slate-50" data-open-resource="${res.id}">
                         <div class="truncate">${res.name}</div>
                         ${
@@ -399,6 +577,190 @@ function renderDashboard(apps, resources) {
             )
             .join("")}
         </div>`;
+  wireDashboardDragDrop();
+}
+
+function wireDashboardDragDrop() {
+  const tray = el("globalTrayAppsRow");
+  if (tray) {
+    tray.querySelectorAll("[data-global-tray-tile]").forEach((tile) => {
+      tile.setAttribute("draggable", "true");
+      tile.addEventListener("dragstart", (e) => {
+        const id = Number(tile.dataset.globalTrayTile);
+        e.dataTransfer.setData(
+          "text/plain",
+          JSON.stringify({ kind: "global-tray", id }),
+        );
+        e.dataTransfer.effectAllowed = "move";
+        tile.classList.add("opacity-50");
+      });
+      tile.addEventListener("dragend", () => {
+        tile.classList.remove("opacity-50");
+      });
+    });
+    if (!tray.dataset.ccDdBound) {
+      tray.dataset.ccDdBound = "1";
+      tray.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+      });
+      tray.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        let payload;
+        try {
+          payload = JSON.parse(e.dataTransfer.getData("text/plain") || "{}");
+        } catch {
+          return;
+        }
+        if (payload.kind !== "global-tray") return;
+        const targetTile = e.target.closest("[data-global-tray-tile]");
+        if (!targetTile || !tray.contains(targetTile)) return;
+        const sourceId = Number(payload.id);
+        const targetId = Number(targetTile.dataset.globalTrayTile);
+        const ids = (state.globalTrayApps || []).map((a) => a.id);
+        const next = reorderIdList(ids, sourceId, targetId);
+        if (!next) return;
+        try {
+          const result = await apiCall("reorder_global_tray_apps", next);
+          if (result && result.ok === false) {
+            notify(result.error || "Could not reorder universal tray", "error");
+            return;
+          }
+          await loadWorkspaceData();
+        } catch (err) {
+          notify(err.message || String(err), "error");
+        }
+      });
+    }
+  }
+
+  const appsList = el("appsList");
+  if (appsList) {
+    appsList.querySelectorAll("[data-app-tile]").forEach((tile) => {
+      tile.setAttribute("draggable", "true");
+      tile.addEventListener("dragstart", (e) => {
+        const id = Number(tile.dataset.appTile);
+        const category = tile.dataset.appCategory || "Uncategorized";
+        e.dataTransfer.setData(
+          "text/plain",
+          JSON.stringify({ kind: "app", id, category }),
+        );
+        e.dataTransfer.effectAllowed = "move";
+        tile.classList.add("opacity-50");
+      });
+      tile.addEventListener("dragend", () => {
+        tile.classList.remove("opacity-50");
+      });
+    });
+    if (!appsList.dataset.ccDdBound) {
+      appsList.dataset.ccDdBound = "1";
+      appsList.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+      });
+      appsList.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        let payload;
+        try {
+          payload = JSON.parse(e.dataTransfer.getData("text/plain") || "{}");
+        } catch {
+          return;
+        }
+        if (payload.kind !== "app") return;
+        const targetTile = e.target.closest("[data-app-tile]");
+        if (!targetTile || !appsList.contains(targetTile)) return;
+        const targetCat = targetTile.dataset.appCategory || "Uncategorized";
+        if (payload.category !== targetCat) return;
+        const sourceId = Number(payload.id);
+        const targetId = Number(targetTile.dataset.appTile);
+        const apps = state.lastApps || [];
+        const ids = apps
+          .filter((a) => (a.category || "Uncategorized") === targetCat)
+          .map((a) => a.id);
+        const next = reorderIdList(ids, sourceId, targetId);
+        if (!next || !state.activeWorkspaceId) return;
+        try {
+          const result = await apiCall(
+            "reorder_apps_in_category",
+            state.activeWorkspaceId,
+            targetCat,
+            next,
+          );
+          if (result && result.ok === false) {
+            notify(result.error || "Could not reorder apps", "error");
+            return;
+          }
+          await loadWorkspaceData();
+        } catch (err) {
+          notify(err.message || String(err), "error");
+        }
+      });
+    }
+  }
+
+  const resourcesList = el("resourcesList");
+  if (resourcesList) {
+    resourcesList.querySelectorAll("[data-resource-row]").forEach((row) => {
+      row.setAttribute("draggable", "true");
+      row.addEventListener("dragstart", (e) => {
+        const id = Number(row.dataset.resourceRow);
+        const category = row.dataset.resourceCategory || "Uncategorized";
+        e.dataTransfer.setData(
+          "text/plain",
+          JSON.stringify({ kind: "resource", id, category }),
+        );
+        e.dataTransfer.effectAllowed = "move";
+        row.classList.add("opacity-50");
+      });
+      row.addEventListener("dragend", () => {
+        row.classList.remove("opacity-50");
+      });
+    });
+    if (!resourcesList.dataset.ccDdBound) {
+      resourcesList.dataset.ccDdBound = "1";
+      resourcesList.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+      });
+      resourcesList.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        let payload;
+        try {
+          payload = JSON.parse(e.dataTransfer.getData("text/plain") || "{}");
+        } catch {
+          return;
+        }
+        if (payload.kind !== "resource") return;
+        const targetRow = e.target.closest("[data-resource-row]");
+        if (!targetRow || !resourcesList.contains(targetRow)) return;
+        const targetCat = targetRow.dataset.resourceCategory || "Uncategorized";
+        if (payload.category !== targetCat) return;
+        const sourceId = Number(payload.id);
+        const targetId = Number(targetRow.dataset.resourceRow);
+        const resources = state.lastResources || [];
+        const ids = resources
+          .filter((r) => (r.category || "Uncategorized") === targetCat)
+          .map((r) => r.id);
+        const next = reorderIdList(ids, sourceId, targetId);
+        if (!next || !state.activeWorkspaceId) return;
+        try {
+          const result = await apiCall(
+            "reorder_resources_in_category",
+            state.activeWorkspaceId,
+            targetCat,
+            next,
+          );
+          if (result && result.ok === false) {
+            notify(result.error || "Could not reorder resources", "error");
+            return;
+          }
+          await loadWorkspaceData();
+        } catch (err) {
+          notify(err.message || String(err), "error");
+        }
+      });
+    }
+  }
 }
 
 function parseTaskLabelsForCard(task) {
@@ -437,6 +799,12 @@ function buildKanbanTaskCardHtml(task, doneColumnId) {
   const borderClass = blocked
     ? "bg-amber-950/30 border-amber-700/60"
     : "bg-slate-800 border-slate-700/40";
+  const dueToday = isTaskDueToday(task);
+  const duePulseClass = dueToday ? " task-card-due-pulse" : "";
+  const dueLine = formatTaskDueCardLine(task);
+  const dueLineHtml = dueLine
+    ? `<div class="text-[11px] leading-snug text-slate-400">${escapeHtml(dueLine)}</div>`
+    : "";
 
   const labels = parseTaskLabelsForCard(task);
   const appIds = toIdArray(task.app_ids);
@@ -536,7 +904,7 @@ function buildKanbanTaskCardHtml(task, doneColumnId) {
 
   return `
     <div
-      class="group flex flex-col gap-1.5 rounded border ${borderClass} p-2 text-sm cursor-grab active:cursor-grabbing"
+      class="group flex flex-col gap-1.5 rounded border ${borderClass} p-2 text-sm cursor-grab active:cursor-grabbing${duePulseClass}"
       draggable="true"
       data-task-card="true"
       data-task-id="${task.id}"
@@ -550,6 +918,7 @@ function buildKanbanTaskCardHtml(task, doneColumnId) {
               </span>
               <span class="font-medium leading-snug text-slate-100">${escapeHtml(task.title || "")}</span>
             </div>
+            ${dueLineHtml}
             ${mdBlock}
           </div>
           ${appsBlock}
@@ -571,7 +940,9 @@ function renderKanban() {
   root.innerHTML = "";
   const doneColumnId = getDoneColumnId();
   state.columns.forEach((column, index) => {
-    const tasks = state.tasks.filter((task) => task.column_id === column.id);
+    const tasks = sortTasksForKanbanColumn(
+      state.tasks.filter((task) => task.column_id === column.id),
+    );
     const col = document.createElement("div");
     col.className =
       "rounded border border-slate-800 p-3 bg-slate-900 min-w-[min(100%,20rem)] flex-1 basis-80 max-w-full";
@@ -823,17 +1194,24 @@ function renderKanban() {
 }
 
 async function loadWorkspaceData() {
-  if (!state.activeWorkspaceId) return;
-  const [apps, resources, columns, tasks] = await Promise.all([
+  const trayFetch = apiCall("get_global_tray_apps");
+  if (!state.activeWorkspaceId) {
+    state.globalTrayApps = await trayFetch;
+    renderDashboard(state.lastApps || [], state.lastResources || []);
+    return;
+  }
+  const [apps, resources, columns, tasks, globalTray] = await Promise.all([
     apiCall("get_apps", state.activeWorkspaceId),
     apiCall("get_resources", state.activeWorkspaceId),
     apiCall("get_kanban_columns", state.activeWorkspaceId),
     apiCall("get_tasks", state.activeWorkspaceId),
+    trayFetch,
   ]);
   state.lastApps = apps;
   state.lastResources = resources;
   state.columns = columns;
   state.tasks = tasks;
+  state.globalTrayApps = globalTray;
   renderDashboard(apps, resources);
 }
 
@@ -851,8 +1229,13 @@ function openCrudModal(kind, mode, entity = null) {
   state.crud.mode = mode;
   state.crud.entityId = entity?.id ?? null;
 
-  const isApp = kind === "app";
-  el("crudModalTitle").textContent = `${mode === "create" ? "Add" : "Edit"} ${isApp ? "App" : "Resource"}`;
+  const isApp = kind === "app" || kind === "global_tray_app";
+  if (kind === "global_tray_app") {
+    el("crudModalTitle").textContent =
+      mode === "create" ? "Add universal tray app" : "Edit universal tray app";
+  } else {
+    el("crudModalTitle").textContent = `${mode === "create" ? "Add" : "Edit"} ${isApp ? "App" : "Resource"}`;
+  }
   el("crudCommandRow").classList.toggle("hidden", !isApp);
   el("crudIconRow").classList.toggle("hidden", !isApp);
   el("crudTypeRow").classList.toggle("hidden", isApp);
@@ -936,9 +1319,10 @@ function closeSafeNoteModal() {
   el("safeNoteModalRoot").classList.add("hidden");
 }
 
-function openLauncherContextMenu(appId, x, y) {
+function openLauncherContextMenu(appId, x, y, scope = "workspace") {
   state.launcherContext.open = true;
   state.launcherContext.appId = Number(appId);
+  state.launcherContext.scope = scope;
   const menu = el("launcherContextMenu");
   if (!menu) return;
   menu.classList.remove("hidden");
@@ -949,6 +1333,7 @@ function openLauncherContextMenu(appId, x, y) {
 function closeLauncherContextMenu() {
   state.launcherContext.open = false;
   state.launcherContext.appId = null;
+  state.launcherContext.scope = "workspace";
   const menu = el("launcherContextMenu");
   if (!menu) return;
   menu.classList.add("hidden");
@@ -1035,6 +1420,28 @@ async function saveCrudModal() {
       await apiCall("create_app", state.activeWorkspaceId, name, commandPath, category, iconType, iconValue);
     } else {
       await apiCall("update_app", state.crud.entityId, name, commandPath, category, iconType, iconValue);
+    }
+  } else if (state.crud.kind === "global_tray_app") {
+    const commandPath = el("crudCommand").value.trim();
+    if (!commandPath) {
+      notify("Command / path is required.", "error");
+      return;
+    }
+    const iconType = el("crudIconTypeFile").checked ? "file" : "unicode";
+    const iconValue =
+      iconType === "file" ? el("crudIconFile").value.trim() : el("crudIconUnicode").value.trim();
+    if (state.crud.mode === "create") {
+      await apiCall("create_global_tray_app", name, commandPath, category, iconType, iconValue);
+    } else {
+      await apiCall(
+        "update_global_tray_app",
+        state.crud.entityId,
+        name,
+        commandPath,
+        category,
+        iconType,
+        iconValue
+      );
     }
   } else if (state.crud.kind === "resource") {
     const type = el("crudType").value;
@@ -1213,6 +1620,17 @@ function closeSearchModal() {
 async function buildSearchIndex() {
   const workspaces = await apiCall("get_workspaces");
   const index = [];
+  const globalTray = await apiCall("get_global_tray_apps");
+  state.globalTrayApps = globalTray;
+  globalTray.forEach((app) =>
+    index.push({
+      kind: "global_tray_app",
+      id: app.id,
+      workspace_id: 0,
+      title: app.name,
+      subtitle: "Universal Tray",
+    })
+  );
 
   for (const workspace of workspaces) {
     index.push({
@@ -1250,15 +1668,18 @@ async function buildSearchIndex() {
       })
     );
 
-    tasks.forEach((task) =>
+    tasks.forEach((task) => {
+      const dueBit = formatTaskDueCardLine(task);
       index.push({
         kind: "task",
         id: task.id,
         workspace_id: workspace.id,
         title: task.title,
-        subtitle: `Task in ${workspace.name}`,
-      })
-    );
+        subtitle: dueBit
+          ? `Task in ${workspace.name} · ${dueBit}`
+          : `Task in ${workspace.name}`,
+      });
+    });
   }
 
   state.search.index = index;
@@ -1356,6 +1777,21 @@ async function jumpToWorkspace(workspaceId) {
 }
 
 async function handleSearchResultClick(entryKind, entryId, workspaceId) {
+  if (entryKind === "global_tray_app") {
+    setView("dashboard");
+    const app = (state.globalTrayApps || []).find((a) => a.id === entryId);
+    if (app) {
+      try {
+        await apiCall("launch_app", app.command_path);
+      } catch (error) {
+        console.error(error);
+        notify(`Failed to launch app: ${error.message}`, "error");
+      }
+    }
+    closeSearchModal();
+    return;
+  }
+
   const switched = await jumpToWorkspace(workspaceId);
   if (!switched) return;
 
@@ -1404,6 +1840,8 @@ function openTaskModal(taskId) {
   el("modalTitle").textContent = `Task #${taskId}`;
   el("taskTitle").value = task.title || "";
   el("taskPriority").value = task.priority || "medium";
+  el("taskDueDate").value = String(task.due_date || "").trim().slice(0, 10);
+  el("taskRecurrence").value = normalizeTaskRecurrence(task.recurrence);
 
   el("taskDescription").value = task.description_md || "";
 
@@ -1469,6 +1907,9 @@ async function saveTaskFromModal() {
     .map((s) => s.trim())
     .filter(Boolean);
 
+  const dueRaw = el("taskDueDate").value.trim();
+  const recurrence = el("taskRecurrence").value || "none";
+
   await apiCall(
     "update_task",
     task.id,
@@ -1479,7 +1920,9 @@ async function saveTaskFromModal() {
     JSON.stringify(labels),
     JSON.stringify(getSelectedIds("taskBlockingIds")),
     JSON.stringify(getSelectedIds("taskAppIds")),
-    JSON.stringify(getSelectedIds("taskResourceIds"))
+    JSON.stringify(getSelectedIds("taskResourceIds")),
+    dueRaw,
+    recurrence
   );
 
   await loadWorkspaceData();
@@ -1713,6 +2156,46 @@ async function refreshSafePanel() {
   }
 }
 
+/**
+ * Apply the active workspace's saved vault preference without re-running pass-cli status/vault list.
+ * Used on workspace switch when Safe was already hydrated by refreshSafePanel().
+ */
+async function applyWorkspaceSafePreference() {
+  try {
+    const status = state.safe.status;
+    if (!status?.installed || !status?.logged_in || !state.safe.vaults.length) {
+      renderSafePanel();
+      return;
+    }
+    if (!state.activeWorkspaceId) {
+      renderSafePanel();
+      return;
+    }
+    const prevVaultId = state.safe.selectedVaultId;
+    let targetVaultId = prevVaultId;
+    const pref = await apiCall("get_workspace_safe_pref", state.activeWorkspaceId);
+    const preferredVaultId = pref?.vault_id;
+    if (
+      preferredVaultId &&
+      state.safe.vaults.some((vault) => String(vault.id) === String(preferredVaultId))
+    ) {
+      targetVaultId = preferredVaultId;
+    }
+    if (String(targetVaultId || "") !== String(prevVaultId || "")) {
+      state.safe.selectedVaultId = targetVaultId;
+      state.safe.selectedItemId = null;
+      state.safe.selectedItemDetail = null;
+      state.safe.latestTotp = "";
+      await loadSafeItems();
+    }
+    renderSafePanel();
+  } catch (error) {
+    state.safe.items = [];
+    renderSafePanel();
+    notify(`Safe: ${error.message}`, "error");
+  }
+}
+
 function renderAll() {
   renderWorkspaceTabs();
   renderKanban();
@@ -1736,6 +2219,9 @@ async function bootstrap() {
     }
     return;
   }
+  state.activeWorkspaceId = null;
+  renderWorkspaceTabs();
+  await loadWorkspaceData();
   renderAll();
 }
 
@@ -1763,6 +2249,7 @@ async function tryUnlockSafeSection() {
 }
 
 function initUI() {
+  startDashboardClock();
   el("showDashboard").onclick = () => setView("dashboard");
   el("showKanban").onclick = () => setView("kanban");
   function bindSectionTitleToggle(titleId, collapsedKey) {
@@ -2273,7 +2760,6 @@ function initUI() {
       try {
         await apiCall("update_workspace", workspaceId, name, workspace.icon || "🖿");
         state.workspaces = await apiCall("get_workspaces");
-        if (workspaceId === state.activeWorkspaceId) await refreshSafePanel();
         renderWorkspaceTabs();
         renderWorkspaceSettingsList();
         notify("Workspace renamed.", "success");
@@ -2299,7 +2785,7 @@ function initUI() {
         state.activeWorkspaceId = state.workspaces[0].id;
       }
       await loadWorkspaceData();
-      await refreshSafePanel();
+      await applyWorkspaceSafePreference();
       renderAll();
       renderWorkspaceSettingsList();
       notify("Workspace deleted.", "success");
@@ -2325,7 +2811,7 @@ function initUI() {
       state.workspaces = await apiCall("get_workspaces");
       state.activeWorkspaceId = state.workspaces[state.workspaces.length - 1].id;
       await loadWorkspaceData();
-      await refreshSafePanel();
+      await applyWorkspaceSafePreference();
       renderAll();
     } catch (error) {
       console.error(error);
@@ -2342,7 +2828,20 @@ function initUI() {
     });
     if (!title) return;
     try {
-      await apiCall("create_task", state.activeWorkspaceId, state.columns[0].id, title);
+      await apiCall(
+        "create_task",
+        state.activeWorkspaceId,
+        state.columns[0].id,
+        title,
+        "",
+        "medium",
+        "[]",
+        "[]",
+        "[]",
+        "[]",
+        "",
+        "none"
+      );
       await loadWorkspaceData();
       renderKanban();
     } catch (error) {
@@ -2374,6 +2873,35 @@ function initUI() {
     if (!state.activeWorkspaceId) return;
     openCrudModal("app", "create");
   };
+
+  el("addGlobalTrayAppBtn").onclick = () => {
+    openCrudModal("global_tray_app", "create");
+  };
+
+  el("globalTrayAppsRow").addEventListener("click", async (event) => {
+    closeLauncherContextMenu();
+    const launchBtn = event.target.closest("[data-launch-global-tray-app]");
+    if (!launchBtn) return;
+    const appId = Number(launchBtn.dataset.launchGlobalTrayApp);
+    if (!appId) return;
+    const app = state.globalTrayApps?.find((a) => a.id === appId);
+    if (!app) return;
+    try {
+      await apiCall("launch_app", app.command_path);
+    } catch (error) {
+      console.error(error);
+      notify(`Failed to launch app: ${error.message}`, "error");
+    }
+  });
+
+  el("globalTrayAppsRow").addEventListener("contextmenu", (event) => {
+    const tile = event.target.closest("[data-global-tray-tile]");
+    if (!tile) return;
+    event.preventDefault();
+    const appId = Number(tile.dataset.globalTrayTile);
+    if (!appId) return;
+    openLauncherContextMenu(appId, event.clientX, event.clientY, "global_tray");
+  });
 
   el("addResourceBtn").onclick = async () => {
     if (!state.activeWorkspaceId) return;
@@ -2424,14 +2952,39 @@ function initUI() {
   });
   el("launcherContextEdit").onclick = () => {
     const appId = Number(state.launcherContext.appId);
+    const scope = state.launcherContext.scope || "workspace";
     closeLauncherContextMenu();
+    if (scope === "global_tray") {
+      const app = state.globalTrayApps?.find((a) => a.id === appId);
+      if (!app) return;
+      openCrudModal("global_tray_app", "edit", app);
+      return;
+    }
     const app = state.lastApps?.find((a) => a.id === appId);
     if (!app) return;
     openCrudModal("app", "edit", app);
   };
   el("launcherContextDelete").onclick = async () => {
     const appId = Number(state.launcherContext.appId);
+    const scope = state.launcherContext.scope || "workspace";
     closeLauncherContextMenu();
+    if (scope === "global_tray") {
+      const app = state.globalTrayApps?.find((a) => a.id === appId);
+      if (!app) return;
+      const ok = await openConfirmModal({
+        title: "Delete universal tray app",
+        message: `Remove "${app.name}" from the universal tray?`,
+      });
+      if (!ok) return;
+      try {
+        await apiCall("delete_global_tray_app", app.id);
+        await loadWorkspaceData();
+      } catch (error) {
+        console.error(error);
+        notify(`Failed to delete app: ${error.message}`, "error");
+      }
+      return;
+    }
     const app = state.lastApps?.find((a) => a.id === appId);
     if (!app) return;
     const ok = await openConfirmModal({

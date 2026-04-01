@@ -57,6 +57,24 @@
         cursor: not-allowed;
       }
 
+      /* Kanban — due / recurring today */
+      @keyframes cc-task-due-pulse {
+        0%,
+        100% {
+          box-shadow:
+            0 0 0 1px rgba(56, 189, 248, 0.45),
+            0 0 10px rgba(56, 189, 248, 0.12);
+        }
+        50% {
+          box-shadow:
+            0 0 0 2px rgba(56, 189, 248, 0.85),
+            0 0 18px rgba(56, 189, 248, 0.35);
+        }
+      }
+      .task-card-due-pulse {
+        animation: cc-task-due-pulse 1.6s ease-in-out infinite;
+      }
+
       /* Kanban task card — markdown (marked output); mirrors modal richness at compact scale */
       .task-card-md {
         font-size: 11px;
@@ -293,6 +311,31 @@
     <main class="p-4 h-[calc(100vh-64px)] overflow-hidden">
       <section id="dashboardView" class="h-full overflow-hidden flex flex-col gap-3">
         <div id="dashboardScrollable" class="flex-1 overflow-y-auto flex flex-col gap-3">
+          <div class="shrink-0 text-center">
+            <time
+              id="dashboardClock"
+              class="inline-block text-lg font-medium tabular-nums tracking-tight text-slate-200 sm:text-xl md:text-2xl"
+              datetime=""
+            ></time>
+          </div>
+          <div class="rounded border border-slate-800 p-3 flex flex-col bg-slate-950/95 shrink-0">
+            <div class="flex items-center justify-between mb-2 gap-2">
+              <h2 class="text-lg font-semibold text-slate-100">Universal Tray</h2>
+              <button
+                id="addGlobalTrayAppBtn"
+                type="button"
+                class="shrink-0 rounded bg-emerald-700 px-2 py-1 text-xs hover:bg-emerald-600"
+              >
+                + App
+              </button>
+            </div>
+            <div
+              id="globalTrayAppsRow"
+              class="flex flex-nowrap items-start gap-3 overflow-x-auto pb-1 min-h-[4.25rem]"
+            >
+              <span class="text-sm text-slate-400">Loading…</span>
+            </div>
+          </div>
           <div class="rounded border border-slate-800 p-3 flex flex-col bg-slate-950/95">
           <div class="flex items-center justify-between mb-2">
             <h2
@@ -454,6 +497,30 @@
                 </select>
               </label>
             </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label class="text-sm">
+                <div class="text-slate-300 mb-1">Due date</div>
+                <input
+                  id="taskDueDate"
+                  type="date"
+                  class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2"
+                />
+              </label>
+              <label class="text-sm">
+                <div class="text-slate-300 mb-1">Repeats</div>
+                <select id="taskRecurrence" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2">
+                  <option value="none">Does not repeat</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="annually">Annually</option>
+                </select>
+              </label>
+            </div>
+            <p class="text-[11px] text-slate-500 -mt-1">
+              Repeating tasks use the due date as an anchor (weekday, day-of-month, or month/day). Daily can omit the date.
+            </p>
 
             <label class="text-sm block">
               <div class="flex items-center justify-between mb-1">
