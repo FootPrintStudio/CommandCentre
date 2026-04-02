@@ -18,6 +18,19 @@ def test_workspace_crud_cycle():
     assert created["id"] not in remaining_ids
 
 
+def test_reorder_workspaces():
+    initialize_database()
+    api = CommandCentreAPI()
+    api.create_workspace("A", "🖿")
+    api.create_workspace("B", "🖿")
+    ids = [w["id"] for w in api.get_workspaces()]
+    reordered = list(reversed(ids))
+    assert api.reorder_workspaces(reordered) == {"ok": True}
+    assert [w["id"] for w in api.get_workspaces()] == reordered
+    bad = api.reorder_workspaces(ids[:1])
+    assert bad.get("ok") is False
+
+
 def test_app_crud_supports_icon_fields():
     initialize_database()
     api = CommandCentreAPI()

@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS workspaces (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
   icon TEXT,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  sort_order INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS apps (
@@ -94,12 +95,13 @@ def initialize_database() -> None:
         _ensure_apps_resources_sort_order(conn)
         _ensure_kanban_columns_is_done(conn)
         _ensure_tasks_due_recurrence(conn)
+        _ensure_workspaces_sort_order(conn)
         _ensure_global_tray_apps_table(conn)
         workspace_count = conn.execute("SELECT COUNT(*) AS count FROM workspaces").fetchone()["count"]
         if workspace_count == 0:
             cursor = conn.execute(
-                "INSERT INTO workspaces(name, icon) VALUES (?, ?)",
-                ("Default", "🖿"),
+                "INSERT INTO workspaces(name, icon, sort_order) VALUES (?, ?, ?)",
+                ("Default", "🖿", 0),
             )
             workspace_id = cursor.lastrowid
             conn.executemany(
@@ -193,6 +195,15 @@ def _ensure_tasks_due_recurrence(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE tasks ADD COLUMN due_date TEXT")
     if "recurrence" not in cols:
         conn.execute("ALTER TABLE tasks ADD COLUMN recurrence TEXT DEFAULT 'none'")
+
+
+def _ensure_workspaces_sort_order(conn: sqlite3.Connection) -> None:
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(workspaces)").fetchall()}
+    if "sort_order" not in cols:
+        conn.execute("ALTER TABLE workspaces ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+        rows = conn.execute("SELECT id FROM workspaces ORDER BY id").fetchall()
+        for i, r in enumerate(rows):
+            conn.execute("UPDATE workspaces SET sort_order = ? WHERE id = ?", (i, r["id"]))
 
 
 @contextmanager

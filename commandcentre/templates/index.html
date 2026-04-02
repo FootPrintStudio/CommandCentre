@@ -239,6 +239,39 @@
         margin-right: 0.35em;
         vertical-align: middle;
       }
+
+      /* Launcher: column count follows each category card width (not viewport). Min 4 columns. */
+      .cc-launcher-category {
+        container-type: inline-size;
+        container-name: cc-launcher;
+      }
+      .cc-launcher-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        column-gap: 0.25rem;
+        row-gap: 0.5rem;
+        align-items: start;
+      }
+      @container cc-launcher (min-width: 36rem) {
+        .cc-launcher-grid {
+          grid-template-columns: repeat(5, minmax(0, 1fr));
+        }
+      }
+      @container cc-launcher (min-width: 48rem) {
+        .cc-launcher-grid {
+          grid-template-columns: repeat(6, minmax(0, 1fr));
+        }
+      }
+      @container cc-launcher (min-width: 60rem) {
+        .cc-launcher-grid {
+          grid-template-columns: repeat(7, minmax(0, 1fr));
+        }
+      }
+      @container cc-launcher (min-width: 72rem) {
+        .cc-launcher-grid {
+          grid-template-columns: repeat(8, minmax(0, 1fr));
+        }
+      }
     </style>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -246,7 +279,11 @@
   </head>
   <body class="bg-slate-950 text-slate-100 h-screen overflow-hidden">
     <header class="border-b border-slate-800 p-3 flex items-center gap-2">
-      <div id="workspaceTabs" class="flex gap-2 overflow-x-auto" aria-busy="false"></div>
+      <div
+        id="workspaceTabs"
+        class="flex min-w-0 flex-1 gap-2 overflow-x-auto scroll-smooth"
+        aria-busy="false"
+      ></div>
       <div
         id="workspaceLoadingIndicator"
         class="hidden shrink-0 items-center gap-2 text-xs text-slate-400"
@@ -859,7 +896,8 @@
               <div id="safeSettingsStatus" class="text-xs text-slate-400">Checking status...</div>
             </div>
             <div class="rounded border border-slate-800 p-3">
-              <div class="text-sm text-slate-300 mb-2">Workspaces</div>
+              <div class="text-sm text-slate-300 mb-1">Workspaces</div>
+              <p class="mb-2 text-[11px] text-slate-500">Drag rows to reorder — same order as the workspace tabs in the header.</p>
               <div id="workspaceSettingsList" class="space-y-2 text-sm"></div>
             </div>
           </div>

@@ -177,11 +177,21 @@ function renderWorkspaceTabs() {
   const loading = Boolean(state.workspaceUi.loading);
   state.workspaces.forEach((workspace) => {
     const button = document.createElement("button");
+    button.type = "button";
     const isActive = workspace.id === state.activeWorkspaceId;
-    button.className = `rounded px-3 py-1 text-sm ${
-      isActive ? "bg-blue-600" : "bg-slate-800 hover:bg-slate-700"
+    const icon = resolveWorkspaceIcon(workspace.icon);
+    const name = String(workspace.name || "").trim() || "Workspace";
+    button.className = `shrink-0 rounded inline-flex items-center justify-center gap-1.5 ${
+      isActive
+        ? "bg-blue-600 px-3 py-1.5 text-sm font-medium whitespace-nowrap"
+        : "min-w-[2.25rem] bg-slate-800 px-2 py-1.5 text-lg leading-none hover:bg-slate-700"
     } ${loading ? "opacity-60 cursor-wait" : ""}`;
-    button.textContent = `${resolveWorkspaceIcon(workspace.icon)} ${workspace.name}`;
+    button.textContent = isActive ? `${icon} ${name}` : icon;
+    button.title = name;
+    button.setAttribute("aria-label", name);
+    if (isActive) {
+      button.setAttribute("aria-current", "true");
+    }
     button.disabled = loading;
     button.classList.toggle("pointer-events-none", loading);
     button.onclick = async () => {
@@ -189,6 +199,8 @@ function renderWorkspaceTabs() {
     };
     tabs.appendChild(button);
   });
+  const activeBtn = tabs.querySelector('[aria-current="true"]');
+  activeBtn?.scrollIntoView({ block: "nearest", inline: "nearest" });
   updateWorkspaceLoadingChrome();
 }
 
@@ -506,24 +518,24 @@ function renderDashboard(apps, resources) {
           ${Object.entries(appsByCat)
             .map(
               ([category, items]) => `
-            <div class="w-full md:basis-[calc(33.333%-0.75rem)] md:max-w-[calc(33.333%-0.75rem)] rounded border border-slate-800 bg-slate-950/70 p-1.5">
+            <div class="cc-launcher-category min-w-0 w-full md:basis-[calc(33.333%-0.75rem)] md:max-w-[calc(33.333%-0.75rem)] rounded border border-slate-800 bg-slate-950/70 p-1.5">
               <button class="w-full text-left text-xs uppercase tracking-wide text-slate-400 mb-1.5 hover:text-slate-200" data-toggle-app-category="${category}">
                 ${state.dashboard.appCategoriesCollapsed[category] ? "▸" : "▾"} ${category}
               </button>
-              <div class="grid grid-cols-[repeat(auto-fit,minmax(4rem,1fr))] items-start gap-x-1 gap-y-2 ${state.dashboard.appCategoriesCollapsed[category] ? "hidden" : ""}">
+              <div class="cc-launcher-grid ${state.dashboard.appCategoriesCollapsed[category] ? "hidden" : ""}">
                 ${items
                   .map(
                     (app) => `
-                    <div class="group relative flex min-w-0 cursor-grab flex-col items-center gap-1 pt-0.5 active:cursor-grabbing" data-app-tile="${app.id}" data-app-category="${escapeHtml(category)}" title="${escapeHtml(app.name)} — drag to reorder">
+                    <div class="group relative flex min-w-0 w-full cursor-grab flex-col items-center gap-1 pt-0.5 active:cursor-grabbing" data-app-tile="${app.id}" data-app-category="${escapeHtml(category)}" title="${escapeHtml(app.name)} — drag to reorder">
                       <button
                         type="button"
                         data-launch-app="${app.id}"
-                        class="flex h-11 w-11 flex-col items-center justify-center rounded-lg border border-slate-600 bg-gradient-to-b from-slate-700 to-slate-800 text-lg shadow transition hover:border-sky-500/60 hover:from-slate-600 hover:to-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500/50 sm:h-12 sm:w-12 sm:text-xl"
+                        class="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-lg border border-slate-600 bg-gradient-to-b from-slate-700 to-slate-800 text-lg shadow transition hover:border-sky-500/60 hover:from-slate-600 hover:to-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500/50 sm:h-12 sm:w-12 sm:text-xl"
                         title="${escapeHtml(app.name)}"
                       >
                         ${getAppTileIconHtml(app)}
                       </button>
-                      <span class="w-full min-w-0 select-none px-0.5 text-center text-[10px] leading-tight text-slate-300 whitespace-normal break-words [overflow-wrap:anywhere] line-clamp-2 sm:text-[11px]">${escapeHtml(
+                      <span class="block min-h-[2.25rem] w-full min-w-0 select-none break-words px-0.5 text-center text-[10px] leading-tight text-slate-300 [overflow-wrap:anywhere] line-clamp-2 sm:min-h-[2.5rem] sm:text-[11px]">${escapeHtml(
                         app.name
                       )}</span>
                     </div>
@@ -1344,17 +1356,78 @@ function renderWorkspaceSettingsList() {
   root.innerHTML = state.workspaces
     .map(
       (workspace) => `
-      <div class="flex items-center justify-between rounded bg-slate-900 px-3 py-2">
-        <span class="truncate pr-2">${resolveWorkspaceIcon(workspace.icon)} ${workspace.name}</span>
-        <div class="flex items-center gap-2">
-          <button class="text-xs text-sky-300 hover:text-sky-200" data-edit-workspace-icon="${workspace.id}">Icon</button>
-          <button class="text-xs text-slate-300 hover:text-white" data-rename-workspace="${workspace.id}">Rename</button>
-          <button class="text-xs text-red-300 hover:text-red-200" data-delete-workspace="${workspace.id}">Delete</button>
+      <div
+        class="flex cursor-grab items-center justify-between rounded bg-slate-900 px-3 py-2 active:cursor-grabbing"
+        data-workspace-row="${workspace.id}"
+        title="Drag to reorder"
+      >
+        <span class="truncate pr-2 select-none">${escapeHtml(resolveWorkspaceIcon(workspace.icon))} ${escapeHtml(workspace.name)}</span>
+        <div class="flex shrink-0 items-center gap-2">
+          <button type="button" class="text-xs text-sky-300 hover:text-sky-200" data-edit-workspace-icon="${workspace.id}">Icon</button>
+          <button type="button" class="text-xs text-slate-300 hover:text-white" data-rename-workspace="${workspace.id}">Rename</button>
+          <button type="button" class="text-xs text-red-300 hover:text-red-200" data-delete-workspace="${workspace.id}">Delete</button>
         </div>
       </div>
     `
     )
     .join("");
+  wireWorkspaceSettingsListDragDrop();
+}
+
+function wireWorkspaceSettingsListDragDrop() {
+  const root = el("workspaceSettingsList");
+  if (!root) return;
+  root.querySelectorAll("[data-workspace-row]").forEach((row) => {
+    row.setAttribute("draggable", "true");
+    row.addEventListener("dragstart", (e) => {
+      const id = Number(row.dataset.workspaceRow);
+      e.dataTransfer.setData(
+        "text/plain",
+        JSON.stringify({ kind: "workspace-settings", id }),
+      );
+      e.dataTransfer.effectAllowed = "move";
+      row.classList.add("opacity-50");
+    });
+    row.addEventListener("dragend", () => {
+      row.classList.remove("opacity-50");
+    });
+  });
+  if (!root.dataset.ccWsDdBound) {
+    root.dataset.ccWsDdBound = "1";
+    root.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+    });
+    root.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      let payload;
+      try {
+        payload = JSON.parse(e.dataTransfer.getData("text/plain") || "{}");
+      } catch {
+        return;
+      }
+      if (payload.kind !== "workspace-settings") return;
+      const targetRow = e.target.closest("[data-workspace-row]");
+      if (!targetRow || !root.contains(targetRow)) return;
+      const sourceId = Number(payload.id);
+      const targetId = Number(targetRow.dataset.workspaceRow);
+      const ids = state.workspaces.map((w) => w.id);
+      const next = reorderIdList(ids, sourceId, targetId);
+      if (!next) return;
+      try {
+        const result = await apiCall("reorder_workspaces", next);
+        if (result && result.ok === false) {
+          notify(result.error || "Could not reorder workspaces", "error");
+          return;
+        }
+        state.workspaces = await apiCall("get_workspaces");
+        renderWorkspaceTabs();
+        renderWorkspaceSettingsList();
+      } catch (err) {
+        notify(err.message || String(err), "error");
+      }
+    });
+  }
 }
 
 function updateSafeLockPinSettingsUI(settings) {

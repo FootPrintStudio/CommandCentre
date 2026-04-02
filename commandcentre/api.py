@@ -43,13 +43,19 @@ class CommandCentreAPI:
 
     def get_workspaces(self):
         with get_connection() as conn:
-            return conn.execute("SELECT * FROM workspaces ORDER BY id").fetchall()
+            return conn.execute(
+                "SELECT * FROM workspaces ORDER BY sort_order, id"
+            ).fetchall()
 
     def create_workspace(self, name, icon):
         with get_connection() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM workspaces"
+            ).fetchone()
+            sort_order = int(row["n"] if row and row["n"] is not None else 0)
             cursor = conn.execute(
-                "INSERT INTO workspaces(name, icon) VALUES (?, ?)",
-                (name, icon),
+                "INSERT INTO workspaces(name, icon, sort_order) VALUES (?, ?, ?)",
+                (name, icon, sort_order),
             )
             workspace_id = cursor.lastrowid
             conn.executemany(
@@ -75,6 +81,20 @@ class CommandCentreAPI:
     def delete_workspace(self, workspace_id):
         with get_connection() as conn:
             conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
+            conn.commit()
+        return {"ok": True}
+
+    def reorder_workspaces(self, ordered_ids):
+        ids = list(ordered_ids or [])
+        with get_connection() as conn:
+            existing = {row["id"] for row in conn.execute("SELECT id FROM workspaces").fetchall()}
+            if set(ids) != existing or len(ids) != len(existing):
+                return {"ok": False, "error": "ordered_ids must list each workspace exactly once"}
+            for i, wid in enumerate(ids):
+                conn.execute(
+                    "UPDATE workspaces SET sort_order = ? WHERE id = ?",
+                    (i, wid),
+                )
             conn.commit()
         return {"ok": True}
 
