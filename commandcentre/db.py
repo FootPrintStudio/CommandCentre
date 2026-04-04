@@ -59,12 +59,6 @@ CREATE TABLE IF NOT EXISTS tasks (
   recurrence TEXT DEFAULT 'none'
 );
 
-CREATE TABLE IF NOT EXISTS workspace_safe_prefs (
-  workspace_id INTEGER PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
-  vault_id TEXT,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
 CREATE TABLE IF NOT EXISTS app_settings (
   key TEXT PRIMARY KEY,
   value TEXT,
@@ -78,7 +72,8 @@ CREATE TABLE IF NOT EXISTS global_tray_apps (
   category TEXT DEFAULT 'Uncategorized',
   icon_type TEXT DEFAULT 'unicode',
   icon_value TEXT,
-  sort_order INTEGER NOT NULL DEFAULT 0
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  entry_type TEXT NOT NULL DEFAULT 'app'
 );
 """
 
@@ -87,16 +82,24 @@ def _dict_factory(cursor, row):
     return {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
 
 
+def _drop_legacy_workspace_safe_prefs(conn: sqlite3.Connection) -> None:
+    """Removed Safe / Proton Pass integration (vault prefs + lock PIN setting)."""
+    conn.execute("DROP TABLE IF EXISTS workspace_safe_prefs")
+    conn.execute("DELETE FROM app_settings WHERE key = ?", ("safe_lock_pin",))
+
+
 def initialize_database() -> None:
     DATABASE_DIR.mkdir(parents=True, exist_ok=True)
     with get_connection() as conn:
         conn.executescript(SCHEMA_SQL)
+        _drop_legacy_workspace_safe_prefs(conn)
         _ensure_apps_icon_columns(conn)
         _ensure_apps_resources_sort_order(conn)
         _ensure_kanban_columns_is_done(conn)
         _ensure_tasks_due_recurrence(conn)
         _ensure_workspaces_sort_order(conn)
         _ensure_global_tray_apps_table(conn)
+        _ensure_global_tray_entry_type(conn)
         workspace_count = conn.execute("SELECT COUNT(*) AS count FROM workspaces").fetchone()["count"]
         if workspace_count == 0:
             cursor = conn.execute(
@@ -174,10 +177,19 @@ def _ensure_global_tray_apps_table(conn: sqlite3.Connection) -> None:
           category TEXT DEFAULT 'Uncategorized',
           icon_type TEXT DEFAULT 'unicode',
           icon_value TEXT,
-          sort_order INTEGER NOT NULL DEFAULT 0
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          entry_type TEXT NOT NULL DEFAULT 'app'
         )
         """
     )
+
+
+def _ensure_global_tray_entry_type(conn: sqlite3.Connection) -> None:
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(global_tray_apps)").fetchall()}
+    if "entry_type" not in cols:
+        conn.execute(
+            "ALTER TABLE global_tray_apps ADD COLUMN entry_type TEXT NOT NULL DEFAULT 'app'",
+        )
 
 
 def _ensure_kanban_columns_is_done(conn: sqlite3.Connection) -> None:

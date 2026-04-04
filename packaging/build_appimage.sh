@@ -11,7 +11,7 @@
 #
 # Development workflow (unchanged): use a normal venv and run:
 #   pip install -r commandcentre/requirements.txt
-#   python -m commandcentre.main
+#   python -m commandcentre
 #
 # This script uses a separate venv (default: .venv-appimage) so your dev .venv is untouched.
 

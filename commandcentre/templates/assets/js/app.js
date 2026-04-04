@@ -14,12 +14,29 @@ const state = {
   search: {
     open: false,
     index: [],
+    scope: "all",
+    selectedIndex: 0,
+    visibleResults: [],
+  },
+  kanbanFilter: {
+    text: "",
+    priority: "all",
+  },
+  taskReview: {
+    open: false,
+    items: [],
+    index: 0,
+  },
+  columnContext: {
+    columnId: null,
   },
   crud: {
     open: false,
     kind: null, // app | resource
     mode: "create", // create | edit
     entityId: null,
+    /** Apps or resources from selected import workspace (create modal only). */
+    importList: [],
   },
   textModal: {
     open: false,
@@ -33,14 +50,13 @@ const state = {
     open: false,
     columnId: null,
   },
-  safeNoteModal: {
-    open: false,
-  },
   launcherContext: {
     open: false,
     appId: null,
     /** "workspace" | "global_tray" */
     scope: "workspace",
+    /** "app" | "divider" (tray only) */
+    entryType: "app",
   },
   globalTrayApps: [],
   settings: {
@@ -52,8 +68,6 @@ const state = {
   dashboard: {
     launcherCollapsed: false,
     libraryCollapsed: false,
-    safeCollapsed: false,
-    safeLocked: false,
     appCategoriesCollapsed: {},
     resourceCategoriesCollapsed: {},
     appIconCache: {},
@@ -61,18 +75,6 @@ const state = {
   },
   workspaceUi: {
     loading: false,
-  },
-  safe: {
-    partitionKey: null,
-    status: null,
-    vaults: [],
-    selectedVaultId: null,
-    items: [],
-    selectedItemId: null,
-    selectedItemDetail: null,
-    searchQuery: "",
-    showTrashed: false,
-    latestTotp: "",
   },
 };
 
@@ -105,13 +107,9 @@ function notify(message, type = "info") {
   const root = el("toastRoot");
   if (!root) return;
   const toast = document.createElement("div");
-  const colorClass =
-    type === "error"
-      ? "border-red-700 bg-red-950/90 text-red-100"
-      : type === "success"
-        ? "border-emerald-700 bg-emerald-950/90 text-emerald-100"
-        : "border-slate-700 bg-slate-900/95 text-slate-100";
-  toast.className = `rounded border px-3 py-2 text-sm shadow-lg ${colorClass}`;
+  const variant =
+    type === "error" ? "cc-toast--error" : type === "success" ? "cc-toast--success" : "cc-toast--info";
+  toast.className = `cc-toast ${variant}`;
   toast.textContent = message;
   root.appendChild(toast);
   window.setTimeout(() => {
@@ -127,6 +125,28 @@ async function apiCall(method, ...args) {
     throw new Error(`API method ${method} not available on backend`);
   }
   return window.pywebview.api[method](...args);
+}
+
+function injectUserCss(css) {
+  const text = css == null ? "" : String(css);
+  let node = document.getElementById("cc-user-css");
+  if (!node) {
+    node = document.createElement("style");
+    node.id = "cc-user-css";
+    document.head.appendChild(node);
+  }
+  node.textContent = text;
+}
+
+async function applyUserCustomCssFromApi() {
+  try {
+    const res = await apiCall("get_ui_custom_css");
+    if (res && res.ok !== false) {
+      injectUserCss(res.css ?? "");
+    }
+  } catch {
+    /* pywebview API may be unavailable during local HTML open */
+  }
 }
 
 async function copyToClipboard(value) {
@@ -181,14 +201,17 @@ function renderWorkspaceTabs() {
     const isActive = workspace.id === state.activeWorkspaceId;
     const icon = resolveWorkspaceIcon(workspace.icon);
     const name = String(workspace.name || "").trim() || "Workspace";
-    button.className = `shrink-0 rounded inline-flex items-center justify-center gap-1.5 ${
-      isActive
-        ? "bg-blue-600 px-3 py-1.5 text-sm font-medium whitespace-nowrap"
-        : "min-w-[2.25rem] bg-slate-800 px-2 py-1.5 text-lg leading-none hover:bg-slate-700"
-    } ${loading ? "opacity-60 cursor-wait" : ""}`;
+    button.className = `${isActive ? "cc-workspace-tab-active" : "cc-workspace-tab-icon"} inline-flex items-center justify-center gap-1.5 ${
+      loading ? "opacity-60 cursor-wait" : ""
+    }`;
     button.textContent = isActive ? `${icon} ${name}` : icon;
-    button.title = name;
+    const hoverTip = isActive ? `${name} (current workspace)` : `Workspace: ${name}`;
+    button.title = hoverTip;
     button.setAttribute("aria-label", name);
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-selected", isActive ? "true" : "false");
+    button.setAttribute("tabindex", "-1");
+    button.dataset.workspaceId = String(workspace.id);
     if (isActive) {
       button.setAttribute("aria-current", "true");
     }
@@ -204,6 +227,67 @@ function renderWorkspaceTabs() {
   updateWorkspaceLoadingChrome();
 }
 
+function isWorkspaceArrowShortcutBlocked(event) {
+  const t = event.target;
+  if (!t) return true;
+  if (t.closest?.("input, textarea, select, option, [contenteditable=true], [contenteditable='']")) {
+    return true;
+  }
+  const tag = t.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t.isContentEditable) {
+    return true;
+  }
+  if (
+    state.search.open ||
+    state.modal.open ||
+    state.crud.open ||
+    state.settings.open ||
+    state.textModal.open ||
+    state.confirmModal.open ||
+    state.columnEdit.open ||
+    state.launcherContext.open
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Left/Right arrows switch workspace while the window is usable (no modal, not typing in a field).
+ * Wired from the global keydown handler in initUI.
+ */
+function tryHandleGlobalWorkspaceTabArrows(event) {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return false;
+  if (event.ctrlKey || event.metaKey || event.altKey) return false;
+  if (isWorkspaceArrowShortcutBlocked(event)) return false;
+
+  const ids = state.workspaces.map((w) => w.id);
+  if (ids.length === 0) return false;
+
+  const activeIdx = ids.findIndex((id) => Number(id) === Number(state.activeWorkspaceId));
+  if (activeIdx === -1) return false;
+
+  event.preventDefault();
+  const n = ids.length;
+  const nextIndex =
+    event.key === "ArrowLeft" ? (activeIdx - 1 + n) % n : (activeIdx + 1) % n;
+  const nextId = ids[nextIndex];
+  if (Number(nextId) === Number(state.activeWorkspaceId)) {
+    return true;
+  }
+  void switchWorkspace(nextId);
+  return true;
+}
+
+/** role="tablist" / aria-label on the workspace strip (once at init). */
+function wireWorkspaceTablistSemantics() {
+  const root = el("workspaceTabs");
+  if (!root || root.dataset.ccTablistSemantics) return;
+  root.dataset.ccTablistSemantics = "1";
+  root.setAttribute("role", "tablist");
+  root.setAttribute("aria-label", "Workspaces");
+}
+
 async function switchWorkspace(workspaceId) {
   if (state.workspaceUi.loading) {
     notify("Workspace is still loading…", "info");
@@ -217,7 +301,6 @@ async function switchWorkspace(workspaceId) {
   renderWorkspaceTabs();
   try {
     await loadWorkspaceData();
-    await applyWorkspaceSafePreference();
     return true;
   } catch (error) {
     notify(`Workspace switch failed: ${error.message}`, "error");
@@ -309,6 +392,23 @@ function daysInMonthForTask(year, monthIndex) {
   return new Date(year, monthIndex + 1, 0).getDate();
 }
 
+function localTodayISO() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Overdue: non-recurring task with due_date strictly before local calendar today. */
+function isTaskOverdue(task) {
+  const rec = normalizeTaskRecurrence(task.recurrence);
+  if (rec !== "none") return false;
+  const raw = String(task.due_date || "").trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false;
+  return raw < localTodayISO();
+}
+
 function isTaskDueToday(task) {
   const rec = normalizeTaskRecurrence(task.recurrence);
   const parts = parseISODateParts(task.due_date);
@@ -370,6 +470,31 @@ function taskPrioritySortRank(priority) {
 }
 
 /** Order: priority → undated before dated → due date ascending → title. */
+function passesKanbanFilter(task) {
+  const f = state.kanbanFilter || { text: "", priority: "all" };
+  if (f.priority && f.priority !== "all") {
+    const p = String(task.priority || "medium").toLowerCase();
+    if (p !== String(f.priority).toLowerCase()) return false;
+  }
+  const q = (f.text || "").trim().toLowerCase();
+  if (!q) return true;
+  if (String(task.title || "").toLowerCase().includes(q)) return true;
+  if (String(task.description_md || "").toLowerCase().includes(q)) return true;
+  const labels = parseTaskLabelsForCard(task);
+  const lowerLabels = labels.map((x) => String(x).toLowerCase());
+  if (lowerLabels.some((lb) => lb.includes(q))) return true;
+  const rawLabels = String(task.labels ?? "").toLowerCase();
+  if (rawLabels.includes(q)) return true;
+  return false;
+}
+
+function syncKanbanFilterFromDom() {
+  const t = el("kanbanFilterText");
+  const p = el("kanbanFilterPriority");
+  if (t) state.kanbanFilter.text = String(t.value ?? "");
+  if (p) state.kanbanFilter.priority = p.value || "all";
+}
+
 function sortTasksForKanbanColumn(tasks) {
   return [...tasks].sort((a, b) => {
     const pr = taskPrioritySortRank(a.priority) - taskPrioritySortRank(b.priority);
@@ -391,14 +516,6 @@ function escapeHtml(value) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
-}
-
-/** Field labels from Safe item JSON (see system._pretty_pass_field_key): password + bank card secrets. */
-function isSafeDetailObfuscatedField(key) {
-  const n = String(key || "")
-    .trim()
-    .toLowerCase();
-  return n === "password" || n === "number" || n === "verification number" || n === "pin";
 }
 
 /** First visible character for a simple “desktop icon” glyph (supports multi-codepoint graphemes). */
@@ -447,12 +564,8 @@ function queueAppIconLoad(path) {
 }
 
 function renderDashboard(apps, resources) {
-  if (state.dashboard.safeLocked) {
-    state.dashboard.safeCollapsed = true;
-  }
   el("launcherContent")?.classList.toggle("hidden", state.dashboard.launcherCollapsed);
   el("libraryContent")?.classList.toggle("hidden", state.dashboard.libraryCollapsed);
-  el("safeContent")?.classList.toggle("hidden", state.dashboard.safeCollapsed);
   el("launcherSectionTitle")?.setAttribute(
     "aria-expanded",
     String(!state.dashboard.launcherCollapsed),
@@ -461,51 +574,36 @@ function renderDashboard(apps, resources) {
     "aria-expanded",
     String(!state.dashboard.libraryCollapsed),
   );
-  el("safeSectionTitle")?.setAttribute("aria-expanded", String(!state.dashboard.safeCollapsed));
-  const safeTitle = el("safeSectionTitle");
-  if (safeTitle) {
-    safeTitle.title = state.dashboard.safeLocked
-      ? "Locked — click to enter password"
-      : "Click to expand or collapse";
-  }
-  const safeLockBtn = el("safeLockBtn");
-  if (safeLockBtn) {
-    safeLockBtn.classList.toggle("text-amber-400", state.dashboard.safeLocked);
-    safeLockBtn.classList.toggle("ring-1", state.dashboard.safeLocked);
-    safeLockBtn.classList.toggle("ring-amber-600/50", state.dashboard.safeLocked);
-    safeLockBtn.title = state.dashboard.safeLocked
-      ? "Safe is locked — click to enter password"
-      : "Lock Safe (collapse and require password to reopen)";
-    safeLockBtn.setAttribute(
-      "aria-label",
-      state.dashboard.safeLocked ? "Unlock Safe" : "Lock Safe",
-    );
-  }
 
   const globalTrayRoot = el("globalTrayAppsRow");
   const gTray = state.globalTrayApps || [];
   if (globalTrayRoot) {
     globalTrayRoot.innerHTML =
       gTray.length === 0
-        ? `<span class="text-sm text-slate-400 shrink-0">No universal apps yet. Use + App to add one.</span>`
+        ? `<span class="text-sm cc-muted shrink-0">No universal apps yet. Use + App or + Divider to add entries.</span>`
         : gTray
-            .map(
-              (app) => `
-            <div class="group relative flex w-14 shrink-0 cursor-grab flex-col items-center gap-0.5 pt-0.5 active:cursor-grabbing" data-global-tray-tile="${app.id}" title="${escapeHtml(app.name)} — drag to reorder">
+            .map((app) => {
+              const et = app.entry_type || "app";
+              if (et === "divider") {
+                return `
+            <div class="group relative flex w-6 shrink-0 cursor-grab flex-col items-center justify-center pt-0.5 active:cursor-grabbing" data-global-tray-tile="${app.id}" data-global-tray-entry-type="divider" title="${escapeHtml(app.name || "Divider")} — drag to reorder">
+              <div class="cc-tray-divider-line" aria-hidden="true"></div>
+            </div>`;
+              }
+              return `
+            <div class="group relative flex w-14 shrink-0 cursor-grab flex-col items-center gap-0.5 pt-0.5 active:cursor-grabbing" data-global-tray-tile="${app.id}" data-global-tray-entry-type="app" title="${escapeHtml(app.name)} — drag to reorder">
               <button
                 type="button"
                 data-launch-global-tray-app="${app.id}"
-                class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-600 bg-gradient-to-b from-slate-700 to-slate-800 text-lg shadow transition hover:border-violet-500/60 hover:from-slate-600 hover:to-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+                class="cc-app-launch-tile cc-app-launch-tile--tray h-10 w-10"
                 title="${escapeHtml(app.name)}"
               >
                 ${getAppTileIconHtml(app)}
               </button>
-              <span class="line-clamp-2 w-full min-w-0 select-none px-0.5 text-center text-[10px] leading-tight text-slate-300">${escapeHtml(
-                app.name
-              )}</span>
+              <span class="cc-app-tile-caption line-clamp-2">${escapeHtml(app.name)}</span>
             </div>
-          `
-            )
+          `;
+            })
             .join("");
   }
 
@@ -519,8 +617,10 @@ function renderDashboard(apps, resources) {
             .map(
               ([category, items]) => `
             <div class="cc-launcher-category min-w-0 w-full md:basis-[calc(33.333%-0.75rem)] md:max-w-[calc(33.333%-0.75rem)] rounded border border-slate-800 bg-slate-950/70 p-1.5">
-              <button class="w-full text-left text-xs uppercase tracking-wide text-slate-400 mb-1.5 hover:text-slate-200" data-toggle-app-category="${category}">
-                ${state.dashboard.appCategoriesCollapsed[category] ? "▸" : "▾"} ${category}
+              <button type="button" class="w-full text-left text-xs uppercase tracking-wide text-slate-400 mb-1.5 hover:text-slate-200" data-toggle-app-category="${encodeURIComponent(
+                category
+              )}" data-app-category-header="1">
+                ${state.dashboard.appCategoriesCollapsed[category] ? "▸" : "▾"} ${escapeHtml(category)}
               </button>
               <div class="cc-launcher-grid ${state.dashboard.appCategoriesCollapsed[category] ? "hidden" : ""}">
                 ${items
@@ -530,14 +630,12 @@ function renderDashboard(apps, resources) {
                       <button
                         type="button"
                         data-launch-app="${app.id}"
-                        class="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-lg border border-slate-600 bg-gradient-to-b from-slate-700 to-slate-800 text-lg shadow transition hover:border-sky-500/60 hover:from-slate-600 hover:to-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500/50 sm:h-12 sm:w-12 sm:text-xl"
+                        class="cc-app-launch-tile sm:h-12 sm:w-12 sm:text-xl"
                         title="${escapeHtml(app.name)}"
                       >
                         ${getAppTileIconHtml(app)}
                       </button>
-                      <span class="block min-h-[2.25rem] w-full min-w-0 select-none break-words px-0.5 text-center text-[10px] leading-tight text-slate-300 [overflow-wrap:anywhere] line-clamp-2 sm:min-h-[2.5rem] sm:text-[11px]">${escapeHtml(
-                        app.name
-                      )}</span>
+                      <span class="cc-app-tile-caption line-clamp-2">${escapeHtml(app.name)}</span>
                     </div>
                   `
                   )
@@ -559,26 +657,28 @@ function renderDashboard(apps, resources) {
             .map(
               ([category, items]) => `
             <div class="w-full md:basis-[calc(33.333%-0.75rem)] md:max-w-[calc(33.333%-0.75rem)] rounded border border-slate-800 bg-slate-950/70 p-2">
-              <button class="w-full text-left text-xs uppercase tracking-wide text-slate-400 mb-2 hover:text-slate-200" data-toggle-resource-category="${category}">
-                ${state.dashboard.resourceCategoriesCollapsed[category] ? "▸" : "▾"} ${category}
+              <button type="button" class="w-full text-left text-xs uppercase tracking-wide text-slate-400 mb-2 hover:text-slate-200" data-toggle-resource-category="${encodeURIComponent(
+                category
+              )}" data-resource-category-header="1">
+                ${state.dashboard.resourceCategoriesCollapsed[category] ? "▸" : "▾"} ${escapeHtml(category)}
               </button>
               <div class="space-y-1 ${state.dashboard.resourceCategoriesCollapsed[category] ? "hidden" : ""}">
                 ${items
                   .map(
                     (res) => `
-                    <div class="flex cursor-grab items-center justify-between rounded bg-slate-900 px-2 py-1 active:cursor-grabbing" data-resource-row="${res.id}" data-resource-category="${escapeHtml(category)}" title="${escapeHtml(res.name)} — drag to reorder">
-                      <button class="text-left flex-1 min-w-0 hover:text-slate-50" data-open-resource="${res.id}">
+                    <div class="cc-resource-row" data-resource-row="${res.id}" data-resource-category="${escapeHtml(category)}" title="${escapeHtml(res.name)} — drag to reorder">
+                      <button type="button" class="text-left flex-1 min-w-0 hover:text-slate-50" data-open-resource="${res.id}">
                         <div class="truncate">${res.name}</div>
                         ${
                           String(res.description || "").trim()
-                            ? `<div class="mt-0.5 text-[11px] text-slate-400 whitespace-normal break-words [overflow-wrap:anywhere]">${escapeHtml(
+                            ? `<div class="mt-0.5 text-[11px] cc-muted whitespace-normal break-words [overflow-wrap:anywhere]">${escapeHtml(
                                 String(res.description).trim()
                               )}</div>`
                             : ""
                         }
                       </button>
-                      <button class="ml-2 text-xs text-slate-400 hover:text-slate-200" data-edit-resource="${res.id}">Edit</button>
-                      <button class="ml-2 text-xs text-red-300 hover:text-red-200" data-delete-resource="${res.id}">Del</button>
+                      <button type="button" class="cc-kanban-col-action" data-edit-resource="${res.id}">Edit</button>
+                      <button type="button" class="cc-link-danger" data-delete-resource="${res.id}">Del</button>
                     </div>
                   `
                   )
@@ -775,9 +875,38 @@ function wireDashboardDragDrop() {
   }
 }
 
+/**
+ * Normalize task.labels for display and filtering. Handles JSON arrays, comma-separated
+ * text, and pywebview values that may arrive as arrays, strings, or other types.
+ */
 function parseTaskLabelsForCard(task) {
-  if (Array.isArray(task.labels)) return task.labels;
-  return safeJsonParse(task.labels || "[]", []);
+  const raw = task?.labels;
+  if (raw == null || raw === "") return [];
+  if (Array.isArray(raw)) {
+    return raw.map((x) => String(x).trim()).filter(Boolean);
+  }
+  const s = String(raw).trim();
+  if (!s) return [];
+  try {
+    const parsed = JSON.parse(s);
+    if (Array.isArray(parsed)) {
+      return parsed.map((x) => String(x).trim()).filter(Boolean);
+    }
+    if (parsed != null && typeof parsed === "object") {
+      return Object.values(parsed)
+        .map((x) => String(x).trim())
+        .filter(Boolean);
+    }
+    if (typeof parsed === "string" && parsed.trim()) {
+      return [parsed.trim()];
+    }
+  } catch {
+    /* not JSON */
+  }
+  return s
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
 }
 
 function configureMarkedParser() {
@@ -808,14 +937,14 @@ function renderTaskCardMarkdownHtml(md) {
 
 function buildKanbanTaskCardHtml(task, doneColumnId) {
   const blocked = isTaskBlocked(task, doneColumnId);
-  const borderClass = blocked
-    ? "bg-amber-950/30 border-amber-700/60"
-    : "bg-slate-800 border-slate-700/40";
+  const surfaceClass = blocked ? "cc-task-card-blocked" : "cc-task-card-surface";
   const dueToday = isTaskDueToday(task);
+  const overdue = isTaskOverdue(task);
   const duePulseClass = dueToday ? " task-card-due-pulse" : "";
+  const overdueClass = overdue && !dueToday ? " task-card-overdue" : "";
   const dueLine = formatTaskDueCardLine(task);
   const dueLineHtml = dueLine
-    ? `<div class="text-[11px] leading-snug text-slate-400">${escapeHtml(dueLine)}</div>`
+    ? `<div class="text-[11px] leading-snug cc-muted">${escapeHtml(dueLine)}</div>`
     : "";
 
   const labels = parseTaskLabelsForCard(task);
@@ -830,7 +959,7 @@ function buildKanbanTaskCardHtml(task, doneColumnId) {
 
   const mdRaw = (task.description_md || "").trim();
   const mdBlock = mdRaw
-    ? `<div class="max-h-40 overflow-auto rounded border border-slate-700/40 bg-slate-950/35 px-2 py-1.5"><div class="task-card-md">${renderTaskCardMarkdownHtml(
+    ? `<div class="cc-task-md-wrap"><div class="task-card-md">${renderTaskCardMarkdownHtml(
         task.description_md || ""
       )}</div></div>`
     : "";
@@ -838,13 +967,13 @@ function buildKanbanTaskCardHtml(task, doneColumnId) {
   const appsBlock =
     apps.length > 0
       ? `<div class="space-y-0.5">
-          <div class="text-[10px] font-medium uppercase tracking-wide text-slate-500">Apps</div>
+          <div class="text-[10px] font-medium uppercase tracking-wide cc-muted">Apps</div>
           <ul class="list-none space-y-0.5 text-[11px]">
             ${apps
               .map(
                 (a) =>
                   `<li class="min-w-0">
-              <button type="button" class="task-card-launch-app max-w-full truncate text-left text-sky-300 hover:text-sky-200 hover:underline" data-task-card-app-id="${a.id}">${escapeHtml(a.name)}</button>
+              <button type="button" class="task-card-launch-app cc-link-sky" data-task-card-app-id="${a.id}">${escapeHtml(a.name)}</button>
             </li>`
               )
               .join("")}
@@ -855,13 +984,13 @@ function buildKanbanTaskCardHtml(task, doneColumnId) {
   const resourcesBlock =
     resources.length > 0
       ? `<div class="space-y-0.5">
-          <div class="text-[10px] font-medium uppercase tracking-wide text-slate-500">Resources</div>
+          <div class="text-[10px] font-medium uppercase tracking-wide cc-muted">Resources</div>
           <ul class="list-none space-y-0.5 text-[11px]">
             ${resources
               .map(
                 (r) =>
                   `<li class="min-w-0">
-              <button type="button" class="task-card-open-resource max-w-full truncate text-left text-emerald-300 hover:text-emerald-200 hover:underline" data-task-card-resource-id="${r.id}">${escapeHtml(r.name)}</button>
+              <button type="button" class="task-card-open-resource cc-link-emerald" data-task-card-resource-id="${r.id}">${escapeHtml(r.name)}</button>
             </li>`
               )
               .join("")}
@@ -904,9 +1033,7 @@ function buildKanbanTaskCardHtml(task, doneColumnId) {
       ? labels
           .map(
             (lb) =>
-              `<span class="rounded border border-slate-600 px-1.5 py-0.5 text-[10px] text-slate-300">${escapeHtml(
-                String(lb)
-              )}</span>`
+              `<span class="cc-priority-badge cc-priority-medium">${escapeHtml(String(lb))}</span>`
           )
           .join("")
       : "";
@@ -916,7 +1043,7 @@ function buildKanbanTaskCardHtml(task, doneColumnId) {
 
   return `
     <div
-      class="group flex flex-col gap-1.5 rounded border ${borderClass} p-2 text-sm cursor-grab active:cursor-grabbing${duePulseClass}"
+      class="group cc-task-card ${surfaceClass}${duePulseClass}${overdueClass}"
       draggable="true"
       data-task-card="true"
       data-task-id="${task.id}"
@@ -925,10 +1052,10 @@ function buildKanbanTaskCardHtml(task, doneColumnId) {
         <div class="min-w-0 flex-1 space-y-1.5">
           <div class="cursor-pointer space-y-1.5" data-open-task="${task.id}">
             <div class="flex flex-wrap items-center gap-2">
-              <span class="rounded border px-1.5 py-0.5 text-[10px] ${priorityBadgeClass(task.priority)}">
+              <span class="${priorityBadgeClass(task.priority)}">
                 ${(task.priority || "medium").toUpperCase()}
               </span>
-              <span class="font-medium leading-snug text-slate-100">${escapeHtml(task.title || "")}</span>
+              <span class="cc-task-card-title">${escapeHtml(task.title || "")}</span>
             </div>
             ${dueLineHtml}
             ${mdBlock}
@@ -937,8 +1064,8 @@ function buildKanbanTaskCardHtml(task, doneColumnId) {
           ${resourcesBlock}
         </div>
         <div class="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-          <button type="button" data-open-task="${task.id}" class="text-xs text-slate-300 hover:text-white">Edit</button>
-          <button type="button" data-delete-task="${task.id}" class="text-xs text-red-300 hover:text-red-200">Delete</button>
+          <button type="button" data-open-task="${task.id}" class="cc-kanban-col-action">Edit</button>
+          <button type="button" data-delete-task="${task.id}" class="cc-link-danger">Delete</button>
         </div>
       </div>
       ${blockingBlock}
@@ -948,44 +1075,45 @@ function buildKanbanTaskCardHtml(task, doneColumnId) {
 }
 
 function renderKanban() {
+  syncKanbanFilterFromDom();
   const root = el("kanbanColumns");
   root.innerHTML = "";
   const doneColumnId = getDoneColumnId();
   state.columns.forEach((column, index) => {
+    const colId = Number(column.id);
     const tasks = sortTasksForKanbanColumn(
-      state.tasks.filter((task) => task.column_id === column.id),
+      state.tasks.filter(
+        (task) => Number(task.column_id) === colId && passesKanbanFilter(task),
+      ),
     );
     const col = document.createElement("div");
-    col.className =
-      "rounded border border-slate-800 p-3 bg-slate-900 min-w-[min(100%,20rem)] flex-1 basis-80 max-w-full";
+    col.className = "cc-kanban-column";
     col.dataset.columnId = String(column.id);
     col.dataset.columnCard = "true";
     col.innerHTML = `
       <div class="flex items-center justify-between gap-2 mb-2">
         <div class="flex min-w-0 flex-1 items-center gap-2">
-          <button class="shrink-0 text-base leading-none text-slate-400 hover:text-slate-200" data-drag-column="${column.id}" title="Drag to reorder">⇆</button>
+          <button type="button" class="cc-kanban-col-drag" data-drag-column="${column.id}" title="Drag to reorder">⇆</button>
           <h3 class="truncate font-semibold">${column.name}${
-            columnIsDoneColumn(column)
-              ? ' <span class="whitespace-nowrap text-xs font-normal text-emerald-400">(done)</span>'
-              : ""
+            columnIsDoneColumn(column) ? ' <span class="cc-done-label">(done)</span>' : ""
           }</h3>
         </div>
         <div class="flex shrink-0 items-center gap-1">
-          <button class="text-xs text-slate-400 hover:text-slate-200" data-move-column-left="${column.id}" ${
+          <button type="button" class="cc-kanban-col-action" data-move-column-left="${column.id}" ${
             index === 0 ? "disabled" : ""
           }>⇇</button>
-          <button class="text-xs text-slate-400 hover:text-slate-200" data-move-column-right="${column.id}" ${
+          <button type="button" class="cc-kanban-col-action" data-move-column-right="${column.id}" ${
             index === state.columns.length - 1 ? "disabled" : ""
           }>⇉</button>
-          <button class="text-xs text-slate-400 hover:text-slate-200" data-edit-column="${column.id}">Edit</button>
-          <button class="text-xs text-red-300 hover:text-red-200" data-delete-column="${column.id}">Delete</button>
+          <button type="button" class="cc-kanban-col-action" data-edit-column="${column.id}">Edit</button>
+          <button type="button" class="cc-link-danger" data-delete-column="${column.id}">Delete</button>
         </div>
       </div>
       <div class="space-y-2 min-h-12" data-dropzone="true">
         ${
           tasks.length
             ? tasks.map((task) => buildKanbanTaskCardHtml(task, doneColumnId)).join("")
-            : `<div class="text-sm text-slate-400">No tasks</div>`
+            : `<div class="text-sm cc-muted">No tasks</div>`
         }
       </div>
     `;
@@ -1235,7 +1363,7 @@ async function persistColumnOrder(columns) {
   );
 }
 
-function openCrudModal(kind, mode, entity = null) {
+function openCrudModal(kind, mode, entity = null, options = {}) {
   state.crud.open = true;
   state.crud.kind = kind;
   state.crud.mode = mode;
@@ -1255,7 +1383,9 @@ function openCrudModal(kind, mode, entity = null) {
   el("crudDescriptionRow").classList.toggle("hidden", isApp);
 
   el("crudName").value = entity?.name ?? "";
-  el("crudCategory").value = entity?.category ?? "Uncategorized";
+  const categoryDefault =
+    entity?.category ?? (mode === "create" && options.category != null ? options.category : null) ?? "Uncategorized";
+  el("crudCategory").value = categoryDefault;
   el("crudCommand").value = entity?.command_path ?? "";
   const iconType = String(entity?.icon_type || "unicode").toLowerCase();
   el("crudIconTypeUnicode").checked = iconType !== "file";
@@ -1267,13 +1397,79 @@ function openCrudModal(kind, mode, entity = null) {
   el("crudType").value = entity?.type ?? "file";
   el("crudPath").value = entity?.path ?? "";
   el("crudDescription").value = entity?.description ?? "";
+
+  const showImport =
+    mode === "create" && (kind === "app" || kind === "resource");
+  el("crudImportRow").classList.toggle("hidden", !showImport);
+  if (showImport) {
+    resetCrudImportUI();
+  }
+
   el("crudModalRoot").classList.remove("hidden");
+}
+
+function resetCrudImportUI() {
+  state.crud.importList = [];
+  const noOther = el("crudImportNoOtherWs");
+  const controls = el("crudImportControls");
+  const ws = el("crudImportWorkspace");
+  const item = el("crudImportItem");
+  const apply = el("crudImportApply");
+  if (!ws || !item || !apply) return;
+
+  ws.innerHTML = '<option value="">— Select workspace —</option>';
+  const others = state.workspaces.filter((w) => w.id !== state.activeWorkspaceId);
+  others.forEach((w) => {
+    ws.innerHTML += `<option value="${w.id}">${escapeHtml(w.name)}</option>`;
+  });
+  item.innerHTML = '<option value="">— Select item —</option>';
+  item.disabled = true;
+  apply.disabled = true;
+  ws.value = "";
+
+  if (others.length === 0) {
+    noOther?.classList.remove("hidden");
+    controls?.classList.add("hidden");
+  } else {
+    noOther?.classList.add("hidden");
+    controls?.classList.remove("hidden");
+  }
+}
+
+function applyCrudImportFromSelection() {
+  const itemId = Number(el("crudImportItem").value);
+  if (!itemId) return;
+  const list = state.crud.importList || [];
+  if (state.crud.kind === "app") {
+    const app = list.find((a) => a.id === itemId);
+    if (!app) return;
+    el("crudName").value = app.name || "";
+    el("crudCategory").value = app.category || "Uncategorized";
+    el("crudCommand").value = app.command_path || "";
+    const iconType = String(app.icon_type || "unicode").toLowerCase();
+    el("crudIconTypeUnicode").checked = iconType !== "file";
+    el("crudIconTypeFile").checked = iconType === "file";
+    el("crudIconUnicode").value = iconType === "file" ? "" : String(app.icon_value || "").trim();
+    el("crudIconFile").value = iconType === "file" ? String(app.icon_value || "").trim() : "";
+    el("crudIconUnicodeRow").classList.toggle("hidden", iconType === "file");
+    el("crudIconFileRow").classList.toggle("hidden", iconType !== "file");
+  } else if (state.crud.kind === "resource") {
+    const res = list.find((r) => r.id === itemId);
+    if (!res) return;
+    el("crudName").value = res.name || "";
+    el("crudCategory").value = res.category || "Uncategorized";
+    el("crudType").value = res.type || "file";
+    el("crudPath").value = res.path || "";
+    el("crudDescription").value = res.description || "";
+  }
+  notify("Form filled from selection — review and click Save.", "success");
 }
 
 function closeCrudModal() {
   state.crud.open = false;
   state.crud.kind = null;
   state.crud.entityId = null;
+  state.crud.importList = [];
   el("crudModalRoot").classList.add("hidden");
 }
 
@@ -1284,6 +1480,7 @@ function openTextModal({ title, label, value = "", inputType = "text" }) {
   const input = el("textModalInput");
   input.type = inputType;
   input.value = value;
+  input.spellcheck = inputType !== "password";
   el("textModalRoot").classList.remove("hidden");
   input.focus();
   if (inputType !== "password") input.select();
@@ -1298,7 +1495,9 @@ function closeTextModal(result = null) {
   state.textModal.open = false;
   state.textModal.resolver = null;
   el("textModalRoot").classList.add("hidden");
-  el("textModalInput").type = "text";
+  const input = el("textModalInput");
+  input.type = "text";
+  input.spellcheck = true;
 }
 
 function openConfirmModal({ title = "Confirm", message = "Are you sure?" }) {
@@ -1318,25 +1517,20 @@ function closeConfirmModal(result = false) {
   el("confirmModalRoot").classList.add("hidden");
 }
 
-function openSafeNoteModal() {
-  state.safeNoteModal.open = true;
-  el("safeNoteTitle").value = "";
-  el("safeNoteContent").value = "";
-  el("safeNoteModalRoot").classList.remove("hidden");
-  el("safeNoteTitle").focus();
-}
-
-function closeSafeNoteModal() {
-  state.safeNoteModal.open = false;
-  el("safeNoteModalRoot").classList.add("hidden");
-}
-
-function openLauncherContextMenu(appId, x, y, scope = "workspace") {
+function openLauncherContextMenu(appId, x, y, scope = "workspace", entryType = "app") {
   state.launcherContext.open = true;
   state.launcherContext.appId = Number(appId);
   state.launcherContext.scope = scope;
+  state.launcherContext.entryType = entryType;
   const menu = el("launcherContextMenu");
   if (!menu) return;
+  const appActs = el("launcherContextAppActions");
+  const divActs = el("launcherContextDividerActions");
+  const isDivider = scope === "global_tray" && entryType === "divider";
+  if (appActs && divActs) {
+    appActs.classList.toggle("hidden", isDivider);
+    divActs.classList.toggle("hidden", !isDivider);
+  }
   menu.classList.remove("hidden");
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
@@ -1346,6 +1540,7 @@ function closeLauncherContextMenu() {
   state.launcherContext.open = false;
   state.launcherContext.appId = null;
   state.launcherContext.scope = "workspace";
+  state.launcherContext.entryType = "app";
   const menu = el("launcherContextMenu");
   if (!menu) return;
   menu.classList.add("hidden");
@@ -1357,15 +1552,15 @@ function renderWorkspaceSettingsList() {
     .map(
       (workspace) => `
       <div
-        class="flex cursor-grab items-center justify-between rounded bg-slate-900 px-3 py-2 active:cursor-grabbing"
+        class="cc-resource-row px-3 py-2"
         data-workspace-row="${workspace.id}"
         title="Drag to reorder"
       >
         <span class="truncate pr-2 select-none">${escapeHtml(resolveWorkspaceIcon(workspace.icon))} ${escapeHtml(workspace.name)}</span>
         <div class="flex shrink-0 items-center gap-2">
-          <button type="button" class="text-xs text-sky-300 hover:text-sky-200" data-edit-workspace-icon="${workspace.id}">Icon</button>
-          <button type="button" class="text-xs text-slate-300 hover:text-white" data-rename-workspace="${workspace.id}">Rename</button>
-          <button type="button" class="text-xs text-red-300 hover:text-red-200" data-delete-workspace="${workspace.id}">Delete</button>
+          <button type="button" class="cc-link-sky text-xs" data-edit-workspace-icon="${workspace.id}">Icon</button>
+          <button type="button" class="cc-kanban-col-action text-xs" data-rename-workspace="${workspace.id}">Rename</button>
+          <button type="button" class="cc-link-danger" data-delete-workspace="${workspace.id}">Delete</button>
         </div>
       </div>
     `
@@ -1430,19 +1625,6 @@ function wireWorkspaceSettingsListDragDrop() {
   }
 }
 
-function updateSafeLockPinSettingsUI(settings) {
-  const status = el("safeLockPinStatus");
-  if (status) {
-    status.textContent = settings?.safe_lock_pin_is_custom
-      ? "A custom PIN is saved (not shown)."
-      : "Using the default PIN 0000 (nothing custom saved in the database).";
-  }
-  const n = el("safeLockPinNew");
-  const c = el("safeLockPinConfirm");
-  if (n) n.value = "";
-  if (c) c.value = "";
-}
-
 async function openSettingsModal() {
   state.settings.open = true;
   el("settingsModalRoot").classList.remove("hidden");
@@ -1460,16 +1642,93 @@ async function openSettingsModal() {
     state.settings.hotkeyEnabled = Boolean(settings?.hotkey_enabled ?? true);
     el("trayToggle").checked = state.settings.trayEnabled;
     el("hotkeyToggle").checked = state.settings.hotkeyEnabled;
-    updateSafeLockPinSettingsUI(settings);
   } catch (error) {
     notify(`Failed to read integration settings: ${error.message}`, "error");
   }
-  await refreshSafePanel();
+  try {
+    const cssRes = await apiCall("get_ui_custom_css");
+    const ta = el("settingsCustomCss");
+    if (ta) ta.value = cssRes?.css != null ? String(cssRes.css) : "";
+  } catch (error) {
+    notify(`Failed to load custom CSS: ${error.message}`, "error");
+  }
 }
 
 function closeSettingsModal() {
   state.settings.open = false;
   el("settingsModalRoot").classList.add("hidden");
+}
+
+function renderTaskReviewBody() {
+  const items = state.taskReview.items;
+  const root = el("taskReviewBody");
+  if (!root) return;
+  if (!items.length) {
+    root.innerHTML = `<p class="cc-muted">No tasks in the review queue.</p>`;
+    return;
+  }
+  const i = Math.min(state.taskReview.index, items.length - 1);
+  state.taskReview.index = i;
+  const it = items[i];
+  const due = it.due_date ? String(it.due_date).trim().slice(0, 10) : "—";
+  root.innerHTML = `
+    <div class="space-y-2">
+      <div class="text-xs uppercase tracking-wide cc-muted">${escapeHtml(it.workspace_name || "")}</div>
+      <div class="text-base font-medium text-slate-100">${escapeHtml(it.title || "")}</div>
+      <div class="flex flex-wrap gap-2 text-xs cc-muted">
+        <span>Due: ${escapeHtml(due)}</span>
+        <span>Priority: ${escapeHtml(String(it.priority || "medium"))}</span>
+        <span>${i + 1} / ${items.length}</span>
+      </div>
+    </div>`;
+}
+
+async function openTaskReviewModal() {
+  state.taskReview.open = true;
+  el("taskReviewModalRoot").classList.remove("hidden");
+  const body = el("taskReviewBody");
+  if (body) body.innerHTML = `<div class="cc-muted">Loading…</div>`;
+  try {
+    const res = await apiCall("get_task_review_queue");
+    if (!res || res.ok === false) throw new Error(res?.error || "Queue failed");
+    state.taskReview.items = res.items || [];
+    state.taskReview.index = 0;
+    renderTaskReviewBody();
+  } catch (e) {
+    notify(e.message || String(e), "error");
+    closeTaskReviewModal();
+  }
+}
+
+function closeTaskReviewModal() {
+  state.taskReview.open = false;
+  state.taskReview.items = [];
+  state.taskReview.index = 0;
+  el("taskReviewModalRoot")?.classList.add("hidden");
+}
+
+function stepTaskReview(delta) {
+  const n = state.taskReview.items.length;
+  if (!n) return;
+  state.taskReview.index = (state.taskReview.index + delta + n) % n;
+  renderTaskReviewBody();
+}
+
+async function taskReviewOpenFullEditor() {
+  const items = state.taskReview.items;
+  const i = state.taskReview.index;
+  const it = items[i];
+  if (!it) return;
+  closeTaskReviewModal();
+  const ok = await switchWorkspace(it.workspace_id);
+  if (!ok) return;
+  setView("kanban");
+  openTaskModal(it.task_id);
+}
+
+function closeColumnContextMenu() {
+  state.columnContext.columnId = null;
+  el("columnContextMenu")?.classList.add("hidden");
 }
 
 async function saveCrudModal() {
@@ -1630,10 +1889,10 @@ function isTaskBlocked(task, doneColumnId) {
 
 function priorityBadgeClass(priority) {
   const normalized = String(priority || "medium").toLowerCase();
-  if (normalized === "critical") return "bg-red-900/70 text-red-200 border-red-700/70";
-  if (normalized === "high") return "bg-amber-900/60 text-amber-200 border-amber-700/70";
-  if (normalized === "low") return "bg-sky-900/60 text-sky-200 border-sky-700/70";
-  return "bg-slate-800 text-slate-200 border-slate-700";
+  if (normalized === "critical") return "cc-priority-badge cc-priority-critical";
+  if (normalized === "high") return "cc-priority-badge cc-priority-high";
+  if (normalized === "low") return "cc-priority-badge cc-priority-low";
+  return "cc-priority-badge cc-priority-medium";
 }
 
 function populateTaskModalCheckboxGroup(containerId, options, selectedIds, getLabel) {
@@ -1668,14 +1927,27 @@ function closeModal() {
   el("modalRoot").classList.add("hidden");
 }
 
+function syncSearchScopeButtons() {
+  const allBtn = el("searchScopeAll");
+  const curBtn = el("searchScopeCurrent");
+  if (!allBtn || !curBtn) return;
+  const isAll = state.search.scope === "all";
+  allBtn.setAttribute("aria-pressed", String(isAll));
+  curBtn.setAttribute("aria-pressed", String(!isAll));
+  allBtn.className = isAll ? "cc-search-scope-btn cc-search-scope-btn--active" : "cc-search-scope-btn";
+  curBtn.className = !isAll ? "cc-search-scope-btn cc-search-scope-btn--active" : "cc-search-scope-btn";
+}
+
 function openSearchModal() {
   state.search.open = true;
+  state.search.selectedIndex = 0;
   el("searchModalRoot").classList.remove("hidden");
   el("searchInput").value = "";
-  el("searchResults").innerHTML = `<div class="text-slate-400 px-2 py-2">Loading index...</div>`;
+  syncSearchScopeButtons();
+  el("searchResults").innerHTML = `<div class="cc-muted px-2 py-2">Loading index...</div>`;
   buildSearchIndex()
     .then(() => {
-      el("searchResults").innerHTML = `<div class="text-slate-400 px-2 py-2">Type to search...</div>`;
+      el("searchResults").innerHTML = `<div class="cc-muted px-2 py-2">Type to search...</div>`;
       el("searchInput").focus();
     })
     .catch((error) => {
@@ -1690,20 +1962,68 @@ function closeSearchModal() {
   el("searchModalRoot").classList.add("hidden");
 }
 
+function staticSearchActionEntries() {
+  return [
+    {
+      kind: "action",
+      action: "view_dashboard",
+      id: 0,
+      workspace_id: 0,
+      title: "Dashboard",
+      subtitle: "Action · Launcher view",
+    },
+    {
+      kind: "action",
+      action: "view_kanban",
+      id: 0,
+      workspace_id: 0,
+      title: "Kanban",
+      subtitle: "Action · Task board",
+    },
+    {
+      kind: "action",
+      action: "open_settings",
+      id: 0,
+      workspace_id: 0,
+      title: "Settings",
+      subtitle: "Action · Preferences",
+    },
+    {
+      kind: "action",
+      action: "task_review",
+      id: 0,
+      workspace_id: 0,
+      title: "Task review",
+      subtitle: "Action · Due today & critical",
+    },
+  ];
+}
+
 async function buildSearchIndex() {
   const workspaces = await apiCall("get_workspaces");
   const index = [];
   const globalTray = await apiCall("get_global_tray_apps");
   state.globalTrayApps = globalTray;
-  globalTray.forEach((app) =>
+  globalTray.forEach((app) => {
+    const et = app.entry_type || "app";
+    if (et === "divider") {
+      index.push({
+        kind: "global_tray_divider",
+        id: app.id,
+        workspace_id: 0,
+        title: app.name || "—",
+        subtitle: "Universal Tray · Divider",
+      });
+      return;
+    }
     index.push({
       kind: "global_tray_app",
       id: app.id,
       workspace_id: 0,
       title: app.name,
       subtitle: "Universal Tray",
-    })
-  );
+    });
+  });
 
   for (const workspace of workspaces) {
     index.push({
@@ -1755,42 +2075,80 @@ async function buildSearchIndex() {
     });
   }
 
-  state.search.index = index;
+  state.search.index = [...staticSearchActionEntries(), ...index];
 }
 
 function renderSearchResults(query) {
-  const q = query.trim().toLowerCase();
-  if (!q) {
-    el("searchResults").innerHTML = `<div class="text-slate-400 px-2 py-2">Type to search...</div>`;
+  const qRaw = String(query || "").trim();
+  const q = qRaw.toLowerCase();
+  if (!qRaw) {
+    state.search.visibleResults = [];
+    state.search.selectedIndex = 0;
+    el("searchResults").innerHTML = `<div class="cc-muted px-2 py-2">Type to search...</div>`;
     return;
   }
-  const results = state.search.index
+
+  let pool = state.search.index
     .map((entry) => ({ entry, score: scoreSearchEntry(entry, q) }))
-    .filter((item) => item.score > 0)
+    .filter((item) => item.score > 0);
+
+  if (state.search.scope === "current" && state.activeWorkspaceId) {
+    const aid = state.activeWorkspaceId;
+    pool = pool.filter(({ entry }) => {
+      if (entry.kind === "action") return true;
+      if (entry.kind === "global_tray_app" || entry.kind === "global_tray_divider") return true;
+      return entry.workspace_id === aid;
+    });
+  }
+
+  const results = pool
     .sort((a, b) => b.score - a.score || a.entry.title.localeCompare(b.entry.title))
     .slice(0, 100)
     .map((item) => item.entry);
 
+  state.search.visibleResults = results;
+  if (state.search.selectedIndex >= results.length) {
+    state.search.selectedIndex = Math.max(0, results.length - 1);
+  }
+
   if (!results.length) {
-    el("searchResults").innerHTML = `<div class="text-slate-400 px-2 py-2">No matches.</div>`;
+    el("searchResults").innerHTML = `<div class="cc-muted px-2 py-2">No matches.</div>`;
     return;
   }
 
   el("searchResults").innerHTML = results
-    .map(
-      (entry) => `
+    .map((entry, idx) => {
+      const sel = idx === state.search.selectedIndex ? " search-result-selected" : "";
+      if (entry.kind === "action") {
+        return `
       <button
-        class="w-full text-left rounded px-2 py-2 hover:bg-slate-900 flex items-center justify-between"
-        data-search-kind="${entry.kind}"
+        type="button"
+        class="cc-search-result-row${sel}"
+        data-search-index="${idx}"
+        data-search-kind="action"
+        data-search-action="${escapeHtml(String(entry.action || ""))}"
+      >
+        <span class="truncate pr-2">${escapeHtml(entry.title)}</span>
+        <span class="text-xs cc-muted">${escapeHtml(entry.subtitle)}</span>
+      </button>`;
+      }
+      return `
+      <button
+        type="button"
+        class="cc-search-result-row${sel}"
+        data-search-index="${idx}"
+        data-search-kind="${escapeHtml(entry.kind)}"
         data-search-id="${entry.id}"
         data-search-workspace-id="${entry.workspace_id}"
       >
-        <span class="truncate pr-2">${entry.title}</span>
-        <span class="text-xs text-slate-400">${entry.subtitle}</span>
-      </button>
-    `
-    )
+        <span class="truncate pr-2">${escapeHtml(entry.title)}</span>
+        <span class="text-xs cc-muted">${escapeHtml(entry.subtitle)}</span>
+      </button>`;
+    })
     .join("");
+
+  const selected = el("searchResults").querySelector(".search-result-selected");
+  selected?.scrollIntoView({ block: "nearest" });
 }
 
 function scoreSearchEntry(entry, query) {
@@ -1814,6 +2172,7 @@ function scoreSearchEntry(entry, query) {
 
   if (entry.kind === "workspace") score += 40;
   if (entry.kind === "task") score += 20;
+  if (entry.kind === "action") score += 25;
 
   return score;
 }
@@ -1847,6 +2206,36 @@ function subsequenceScore(text, query) {
 
 async function jumpToWorkspace(workspaceId) {
   return switchWorkspace(workspaceId);
+}
+
+async function handleSearchResultEntry(entry) {
+  if (!entry) return;
+  if (entry.kind === "action") {
+    const a = entry.action;
+    closeSearchModal();
+    if (a === "view_dashboard") {
+      setView("dashboard");
+      return;
+    }
+    if (a === "view_kanban") {
+      setView("kanban");
+      return;
+    }
+    if (a === "open_settings") {
+      await openSettingsModal();
+      return;
+    }
+    if (a === "task_review") {
+      await openTaskReviewModal();
+      return;
+    }
+    return;
+  }
+  if (entry.kind === "global_tray_divider") {
+    closeSearchModal();
+    return;
+  }
+  await handleSearchResultClick(entry.kind, entry.id, entry.workspace_id);
 }
 
 async function handleSearchResultClick(entryKind, entryId, workspaceId) {
@@ -1918,10 +2307,7 @@ function openTaskModal(taskId) {
 
   el("taskDescription").value = task.description_md || "";
 
-  const labels = Array.isArray(task.labels)
-    ? task.labels
-    : safeJsonParse(task.labels || "[]", []);
-  el("taskLabels").value = labels.join(", ");
+  el("taskLabels").value = parseTaskLabelsForCard(task).join(", ");
   populateTaskModalCheckboxGroup(
     "taskAppIds",
     state.lastApps || [],
@@ -2009,266 +2395,6 @@ function setView(view) {
   el("kanbanView").classList.toggle("hidden", view !== "kanban");
 }
 
-function renderSafePanel() {
-  const statusEl = el("safeStatus");
-  const vaultSelect = el("safeVaultSelect");
-  const itemsList = el("safeItemsList");
-  const detailEl = el("safeItemDetail");
-  const searchInput = el("safeItemSearch");
-  const showTrashedCheckbox = el("safeShowTrashed");
-  if (!statusEl || !vaultSelect || !itemsList || !detailEl || !searchInput || !showTrashedCheckbox) return;
-  searchInput.value = state.safe.searchQuery;
-  showTrashedCheckbox.checked = state.safe.showTrashed;
-
-  const status = state.safe.status;
-  if (!status) {
-    statusEl.textContent = "Checking Proton Pass CLI status...";
-  } else if (!status.installed) {
-    statusEl.textContent =
-      "Proton Pass CLI is not installed. Install pass-cli and run `pass-cli login` in terminal.";
-  } else if (!status.logged_in) {
-    statusEl.textContent = `Not logged in: ${status.message || "Run pass-cli login in terminal."}`;
-  } else {
-    statusEl.textContent = "Connected to Proton Pass CLI.";
-  }
-
-  vaultSelect.innerHTML = state.safe.vaults.length
-    ? state.safe.vaults
-        .map(
-          (vault) =>
-            `<option value="${vault.id}" ${
-              String(vault.id) === String(state.safe.selectedVaultId) ? "selected" : ""
-            }>${vault.name}</option>`
-        )
-        .join("")
-    : `<option value="">No vaults available</option>`;
-  vaultSelect.disabled = !state.safe.vaults.length;
-
-  const filteredItems = state.safe.items.filter((item) => {
-    const stateValue = String(item.state || "").toLowerCase();
-    if (!state.safe.showTrashed && stateValue === "trashed") return false;
-    if (!state.safe.searchQuery.trim()) return true;
-    return String(item.name || "")
-      .toLowerCase()
-      .includes(state.safe.searchQuery.trim().toLowerCase());
-  });
-  itemsList.innerHTML = filteredItems.length
-    ? filteredItems
-        .map(
-          (item) => `
-        <button
-          class="w-full text-left rounded px-2 py-1 flex items-center justify-between ${
-            String(item.id) === String(state.safe.selectedItemId) ? "bg-slate-800" : "bg-slate-950 hover:bg-slate-900"
-          }"
-          data-safe-item-id="${item.id}"
-        >
-          <span class="truncate pr-2">${item.name}</span>
-          <span class="text-[10px] text-slate-500">${item.state || item.type || "item"}</span>
-        </button>
-      `
-        )
-        .join("")
-    : `<div class="text-slate-500">No items.</div>`;
-
-  if (!state.safe.selectedItemDetail) {
-    detailEl.textContent = "Select an item to load details.";
-  } else {
-    const detail = state.safe.selectedItemDetail;
-    const fields = detail.fields || {};
-    const normalizedFields = { ...fields };
-    if (state.safe.latestTotp) {
-      normalizedFields.totp = state.safe.latestTotp;
-    }
-    const fieldRows = Object.entries(fields)
-      .filter(([k]) => k !== "totp_uri")
-      .map(([k, v]) => {
-        if (isSafeDetailObfuscatedField(k)) {
-          const raw = v == null ? "" : String(v);
-          const safe = escapeHtml(raw);
-          const obscured = raw ? "••••••••" : "—";
-          const copyKey = encodeURIComponent(k);
-          return `
-        <div class="py-1 border-b border-slate-900">
-          <div class="text-[10px] uppercase tracking-wide text-slate-500">${escapeHtml(k)}</div>
-          <div class="group safe-field-copy min-h-[1.25rem] cursor-pointer rounded px-1 -mx-1 hover:bg-slate-900/60" data-safe-copy-key="${copyKey}" title="Click to copy">
-            <span class="font-mono text-slate-200 break-all select-all group-hover:hidden">${obscured}</span>
-            <span class="hidden font-mono text-slate-200 break-all select-all group-hover:block">${safe}</span>
-          </div>
-        </div>
-      `;
-        }
-        const display = normalizedFields[k] ?? "";
-        const text = typeof display === "string" ? display : String(display);
-        const copyKey = encodeURIComponent(k);
-        return `
-        <div class="py-1 border-b border-slate-900">
-          <div class="text-[10px] uppercase tracking-wide text-slate-500">${escapeHtml(k)}</div>
-          <div class="safe-field-copy cursor-pointer rounded px-1 -mx-1 text-slate-200 break-all hover:bg-slate-900/60" data-safe-copy-key="${copyKey}" title="Click to copy">${escapeHtml(
-            text
-          )}</div>
-        </div>
-      `;
-      })
-      .join("");
-    detailEl.innerHTML = `
-      <div class="mb-2 space-y-0.5">
-        <div class="safe-field-copy cursor-pointer rounded px-1 -mx-1 font-semibold text-slate-200 hover:bg-slate-900/60" data-safe-copy-key="__name__" title="Click to copy">${escapeHtml(
-          detail.name || String(detail.id)
-        )}</div>
-        <div class="safe-field-copy cursor-pointer rounded px-1 -mx-1 text-[10px] text-slate-500 hover:bg-slate-900/60" data-safe-copy-key="__id__" title="Click to copy">${escapeHtml(
-          String(detail.id)
-        )}</div>
-      </div>
-      ${fieldRows || '<div class="text-slate-500">No readable fields returned for this item.</div>'}
-    `;
-  }
-
-  renderSafeSettingsStatus();
-}
-
-function renderSafeSettingsStatus() {
-  const statusEl = el("safeSettingsStatus");
-  if (!statusEl) return;
-  const status = state.safe.status;
-  if (!status) {
-    statusEl.textContent = "Checking status...";
-    return;
-  }
-  if (!status.installed) {
-    statusEl.textContent = "pass-cli is not installed.";
-    return;
-  }
-  if (!status.logged_in) {
-    statusEl.textContent = `Not logged in. ${status.message || ""}`.trim();
-    return;
-  }
-  statusEl.textContent = "Logged in and ready.";
-}
-
-async function loadSafeStatus() {
-  const status = await apiCall("safe_cli_status");
-  state.safe.status = status;
-  return status;
-}
-
-async function loadSafeVaults() {
-  const result = await apiCall("safe_cli_list_vaults");
-  if (!result?.ok) {
-    throw new Error(result?.error || "Failed to load vaults.");
-  }
-  state.safe.vaults = result.vaults || [];
-  if (!state.safe.vaults.length) {
-    state.safe.selectedVaultId = null;
-    state.safe.items = [];
-    return;
-  }
-  if (
-    !state.safe.selectedVaultId ||
-    !state.safe.vaults.some((v) => String(v.id) === String(state.safe.selectedVaultId))
-  ) {
-    state.safe.selectedVaultId = state.safe.vaults[0].id;
-  }
-}
-
-async function loadSafeItems() {
-  if (!state.safe.selectedVaultId) {
-    state.safe.items = [];
-    return;
-  }
-  const result = await apiCall("safe_cli_list_items", String(state.safe.selectedVaultId));
-  if (!result?.ok) {
-    throw new Error(result?.error || "Failed to load items.");
-  }
-  state.safe.items = result.items || [];
-  if (!state.safe.items.some((item) => String(item.id) === String(state.safe.selectedItemId))) {
-    state.safe.selectedItemId = null;
-    state.safe.selectedItemDetail = null;
-    state.safe.latestTotp = "";
-  }
-}
-
-async function loadSafeItemDetail(itemId) {
-  if (!state.safe.selectedVaultId || !itemId) {
-    state.safe.selectedItemDetail = null;
-    return;
-  }
-  const result = await apiCall("safe_cli_get_item", String(state.safe.selectedVaultId), String(itemId));
-  if (!result?.ok) {
-    throw new Error(result?.error || "Failed to load item detail.");
-  }
-  state.safe.selectedItemDetail = result.item || null;
-  state.safe.latestTotp = "";
-}
-
-async function refreshSafePanel() {
-  try {
-    const status = await loadSafeStatus();
-    if (!status.installed || !status.logged_in) {
-      state.safe.vaults = [];
-      state.safe.items = [];
-      renderSafePanel();
-      return;
-    }
-    await loadSafeVaults();
-    if (state.activeWorkspaceId && state.safe.vaults.length) {
-      const pref = await apiCall("get_workspace_safe_pref", state.activeWorkspaceId);
-      const preferredVaultId = pref?.vault_id;
-      if (
-        preferredVaultId &&
-        state.safe.vaults.some((vault) => String(vault.id) === String(preferredVaultId))
-      ) {
-        state.safe.selectedVaultId = preferredVaultId;
-      }
-    }
-    await loadSafeItems();
-    renderSafePanel();
-  } catch (error) {
-    state.safe.items = [];
-    renderSafePanel();
-    notify(`Safe refresh failed: ${error.message}`, "error");
-  }
-}
-
-/**
- * Apply the active workspace's saved vault preference without re-running pass-cli status/vault list.
- * Used on workspace switch when Safe was already hydrated by refreshSafePanel().
- */
-async function applyWorkspaceSafePreference() {
-  try {
-    const status = state.safe.status;
-    if (!status?.installed || !status?.logged_in || !state.safe.vaults.length) {
-      renderSafePanel();
-      return;
-    }
-    if (!state.activeWorkspaceId) {
-      renderSafePanel();
-      return;
-    }
-    const prevVaultId = state.safe.selectedVaultId;
-    let targetVaultId = prevVaultId;
-    const pref = await apiCall("get_workspace_safe_pref", state.activeWorkspaceId);
-    const preferredVaultId = pref?.vault_id;
-    if (
-      preferredVaultId &&
-      state.safe.vaults.some((vault) => String(vault.id) === String(preferredVaultId))
-    ) {
-      targetVaultId = preferredVaultId;
-    }
-    if (String(targetVaultId || "") !== String(prevVaultId || "")) {
-      state.safe.selectedVaultId = targetVaultId;
-      state.safe.selectedItemId = null;
-      state.safe.selectedItemDetail = null;
-      state.safe.latestTotp = "";
-      await loadSafeItems();
-    }
-    renderSafePanel();
-  } catch (error) {
-    state.safe.items = [];
-    renderSafePanel();
-    notify(`Safe: ${error.message}`, "error");
-  }
-}
-
 function renderAll() {
   renderWorkspaceTabs();
   renderKanban();
@@ -2283,7 +2409,6 @@ async function bootstrap() {
     renderWorkspaceTabs();
     try {
       await loadWorkspaceData();
-      await refreshSafePanel();
     } catch (error) {
       notify(`Failed to load workspace: ${error.message}`, "error");
     } finally {
@@ -2298,33 +2423,14 @@ async function bootstrap() {
   renderAll();
 }
 
-async function tryUnlockSafeSection() {
-  const pwd = await openTextModal({
-    title: "Unlock Safe",
-    label: "PIN",
-    value: "",
-    inputType: "password",
-  });
-  if (pwd == null) return;
-  try {
-    const result = await apiCall("verify_safe_lock_pin", pwd);
-    if (result?.ok) {
-      state.dashboard.safeLocked = false;
-      state.dashboard.safeCollapsed = false;
-      renderDashboard(state.lastApps || [], state.lastResources || []);
-      notify("Safe unlocked.", "success");
-    } else {
-      notify("Incorrect PIN.", "error");
-    }
-  } catch (error) {
-    notify(`Unlock failed: ${error.message}`, "error");
-  }
-}
-
 function initUI() {
+  applyUserCustomCssFromApi().catch(() => {});
   startDashboardClock();
   el("showDashboard").onclick = () => setView("dashboard");
-  el("showKanban").onclick = () => setView("kanban");
+  el("showKanban").onclick = () => {
+    setView("kanban");
+    renderKanban();
+  };
   function bindSectionTitleToggle(titleId, collapsedKey) {
     const node = el(titleId);
     if (!node) return;
@@ -2343,43 +2449,9 @@ function initUI() {
       }
     };
   }
-  function bindSafeSectionTitleToggle() {
-    const node = el("safeSectionTitle");
-    if (!node) return;
-    const onActivate = (e) => {
-      e.preventDefault();
-      if (state.dashboard.safeLocked) {
-        tryUnlockSafeSection();
-        return;
-      }
-      state.dashboard.safeCollapsed = !state.dashboard.safeCollapsed;
-      renderDashboard(state.lastApps || [], state.lastResources || []);
-    };
-    node.onclick = onActivate;
-    node.onkeydown = (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        onActivate(e);
-      }
-    };
-  }
   bindSectionTitleToggle("launcherSectionTitle", "launcherCollapsed");
   bindSectionTitleToggle("librarySectionTitle", "libraryCollapsed");
-  bindSafeSectionTitleToggle();
-  const safeLockBtn = el("safeLockBtn");
-  if (safeLockBtn) {
-    safeLockBtn.onclick = (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      if (state.dashboard.safeLocked) {
-        tryUnlockSafeSection();
-        return;
-      }
-      state.dashboard.safeCollapsed = true;
-      state.dashboard.safeLocked = true;
-      renderDashboard(state.lastApps || [], state.lastResources || []);
-    };
-  }
+  wireWorkspaceTablistSemantics();
   el("openSettingsBtn").onclick = () => {
     openSettingsModal().catch((error) => {
       notify(`Failed to open settings: ${error.message}`, "error");
@@ -2388,208 +2460,81 @@ function initUI() {
   el("openSearchBtn").onclick = () => {
     openSearchModal();
   };
-  el("safeRefreshBtn").onclick = () => {
-    refreshSafePanel().then(() => notify("Safe panel refreshed.", "success"));
-  };
-  el("safeCreateNoteBtn").onclick = () => {
-    if (!state.safe.selectedVaultId) {
-      notify("Select a vault first.", "info");
-      return;
-    }
-    openSafeNoteModal();
-  };
-  el("safeStatusRefreshBtn").onclick = () => {
-    refreshSafePanel().then(() => notify("Safe status refreshed.", "success"));
-  };
-  el("safeLoginBtn").onclick = async () => {
-    try {
-      const result = await apiCall("safe_cli_login");
-      if (!result?.ok) {
-        notify(result?.error || "Failed to start pass-cli login.", "error");
-        return;
-      }
-      notify("Opened terminal for pass-cli login.", "success");
-      await refreshSafePanel();
-    } catch (error) {
-      notify(`Failed to start login: ${error.message}`, "error");
-    }
-  };
-  el("safeLogoutBtn").onclick = async () => {
-    try {
-      const result = await apiCall("safe_cli_logout");
-      if (!result?.ok) {
-        notify(result?.error || "Failed to logout from pass-cli.", "error");
-        return;
-      }
-      notify("Logged out from pass-cli.", "success");
-      await refreshSafePanel();
-    } catch (error) {
-      notify(`Failed to logout: ${error.message}`, "error");
-    }
-  };
-  el("safeDebugBtn").onclick = async () => {
-    try {
-      const vaultId = state.safe.selectedVaultId || "";
-      const result = await apiCall("safe_cli_debug", String(vaultId));
-      if (!result?.ok) {
-        notify(result?.error || "Safe debug failed.", "error");
-        return;
-      }
-      const lines = (result.runs || []).map((run) => {
-        const stderr = (run.stderr || "").replace(/\s+/g, " ").trim();
-        return `${run.ok ? "OK" : "ERR"} :: pass-cli ${run.args.join(" ")} :: ${stderr || "no stderr"}`;
-      });
-      notify(lines[0] || "No debug output.", "info");
-      console.log("Safe CLI Debug", result);
-    } catch (error) {
-      notify(`Safe debug failed: ${error.message}`, "error");
-    }
-  };
-  el("safeVaultSelect").addEventListener("change", (event) => {
-    state.safe.selectedVaultId = event.target.value || null;
-    state.safe.selectedItemId = null;
-    state.safe.selectedItemDetail = null;
-    state.safe.latestTotp = "";
-    if (state.activeWorkspaceId && state.safe.selectedVaultId) {
-      apiCall("set_workspace_safe_pref", state.activeWorkspaceId, state.safe.selectedVaultId).catch((error) =>
-        notify(`Failed to save default vault: ${error.message}`, "error")
-      );
-    }
-    loadSafeItems()
-      .then(() => renderSafePanel())
-      .catch((error) => notify(`Failed to load vault items: ${error.message}`, "error"));
-  });
-  el("safeItemSearch").addEventListener("input", (event) => {
-    state.safe.searchQuery = event.target.value || "";
-    renderSafePanel();
-  });
-  el("safeShowTrashed").addEventListener("change", (event) => {
-    state.safe.showTrashed = Boolean(event.target.checked);
-    renderSafePanel();
-  });
-  el("safeItemsList").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-safe-item-id]");
-    if (!button) return;
-    const itemId = button.dataset.safeItemId;
-    state.safe.selectedItemId = itemId;
-    loadSafeItemDetail(itemId)
-      .then(() => renderSafePanel())
-      .catch((error) => notify(`Failed to load item detail: ${error.message}`, "error"));
-  });
-  el("safeItemDetail").addEventListener("click", async (event) => {
-    const node = event.target.closest(".safe-field-copy[data-safe-copy-key]");
-    if (!node || !el("safeItemDetail").contains(node)) return;
-    const detail = state.safe.selectedItemDetail;
-    if (!detail) return;
-    const encoded = node.dataset.safeCopyKey || "";
-    let rawKey;
-    try {
-      rawKey = decodeURIComponent(encoded);
-    } catch {
-      return;
-    }
-    let textToCopy = "";
-    if (rawKey === "__name__") {
-      textToCopy = detail.name ? String(detail.name) : String(detail.id ?? "");
-    } else if (rawKey === "__id__") {
-      textToCopy = detail.id != null ? String(detail.id) : "";
-    } else {
-      const fields = detail.fields || {};
-      const v = fields[rawKey];
-      if (v == null) textToCopy = "";
-      else textToCopy = typeof v === "string" ? v : String(v);
-    }
-    if (!textToCopy) {
-      notify("Nothing to copy.", "info");
-      return;
-    }
-    const ok = await copyToClipboard(textToCopy);
-    notify(ok ? "Copied to clipboard." : "Failed to copy.", ok ? "success" : "error");
-  });
-  el("safeTotpBtn").onclick = async () => {
-    if (!state.safe.selectedVaultId || !state.safe.selectedItemId) {
-      notify("Select an item first.", "info");
-      return;
-    }
-    try {
-      const result = await apiCall(
-        "safe_cli_get_totp",
-        String(state.safe.selectedVaultId),
-        String(state.safe.selectedItemId)
-      );
-      if (!result?.ok || !result?.totp) {
-        notify(result?.error || "No TOTP available for this item.", "error");
-        return;
-      }
-      state.safe.latestTotp = result.totp;
-      renderSafePanel();
-      const copied = await copyToClipboard(result.totp);
-      notify(copied ? "TOTP copied to clipboard." : `TOTP: ${result.totp}`, copied ? "success" : "info");
-    } catch (error) {
-      notify(`Failed to get TOTP: ${error.message}`, "error");
-    }
-  };
-  el("safeDeleteItemBtn").onclick = async () => {
-    if (!state.safe.selectedVaultId || !state.safe.selectedItemId) {
-      notify("Select an item first.", "info");
-      return;
-    }
-    const selected = state.safe.items.find(
-      (item) => String(item.id) === String(state.safe.selectedItemId)
-    );
-    const itemName = selected?.name || state.safe.selectedItemDetail?.name || `#${state.safe.selectedItemId}`;
-    const ok = await openConfirmModal({
-      title: "Delete Safe Item",
-      message: `Delete "${itemName}" from Proton Pass?`,
+  el("openTaskReviewBtn").onclick = () => {
+    openTaskReviewModal().catch((error) => {
+      console.error(error);
+      notify(error.message || String(error), "error");
     });
-    if (!ok) return;
+  };
+  el("taskReviewBackdrop").onclick = closeTaskReviewModal;
+  el("taskReviewClose").onclick = closeTaskReviewModal;
+  el("taskReviewPrev").onclick = () => stepTaskReview(-1);
+  el("taskReviewNext").onclick = () => stepTaskReview(1);
+  el("taskReviewOpenEditor").onclick = () => {
+    taskReviewOpenFullEditor().catch((error) => {
+      console.error(error);
+      notify(error.message || String(error), "error");
+    });
+  };
+  function onKanbanFilterTextInput(event) {
+    state.kanbanFilter.text = String(event.target?.value ?? "");
+    renderKanban();
+  }
+  const kfText = el("kanbanFilterText");
+  const kfPri = el("kanbanFilterPriority");
+  if (kfText) {
+    kfText.addEventListener("input", onKanbanFilterTextInput);
+    kfText.addEventListener("keyup", onKanbanFilterTextInput);
+    kfText.addEventListener("change", onKanbanFilterTextInput);
+  }
+  if (kfPri) {
+    kfPri.addEventListener("change", (event) => {
+      state.kanbanFilter.priority = event.target.value || "all";
+      renderKanban();
+    });
+  }
+  el("kanbanColumns").addEventListener("contextmenu", (event) => {
+    const card = event.target.closest("[data-column-card='true']");
+    if (!card || !el("kanbanColumns").contains(card)) return;
+    event.preventDefault();
+    state.columnContext.columnId = Number(card.dataset.columnId);
+    const menu = el("columnContextMenu");
+    if (!menu) return;
+    menu.classList.remove("hidden");
+    menu.style.left = `${event.clientX}px`;
+    menu.style.top = `${event.clientY}px`;
+  });
+  el("columnContextNewTask").onclick = async () => {
+    const columnId = state.columnContext.columnId;
+    closeColumnContextMenu();
+    if (!columnId || !state.activeWorkspaceId) return;
+    const title = await openTextModal({
+      title: "Create Task",
+      label: "Task title",
+      value: "",
+    });
+    if (!title) return;
     try {
-      const result = await apiCall(
-        "safe_cli_delete_item",
-        String(state.safe.selectedVaultId),
-        String(state.safe.selectedItemId)
+      await apiCall(
+        "create_task",
+        state.activeWorkspaceId,
+        columnId,
+        title,
+        "",
+        "medium",
+        "[]",
+        "[]",
+        "[]",
+        "[]",
+        "",
+        "none",
       );
-      if (!result?.ok) {
-        throw new Error(result?.error || "Delete failed");
-      }
-      state.safe.selectedItemId = null;
-      state.safe.selectedItemDetail = null;
-      state.safe.latestTotp = "";
-      await loadSafeItems();
-      renderSafePanel();
-      notify("Safe item deleted.", "success");
+      await loadWorkspaceData();
+      renderKanban();
     } catch (error) {
-      notify(`Failed to delete item: ${error.message}`, "error");
+      notify(`Failed to create task: ${error.message}`, "error");
     }
   };
-  el("safeNoteBackdrop").onclick = closeSafeNoteModal;
-  el("safeNoteClose").onclick = closeSafeNoteModal;
-  el("safeNoteCancel").onclick = closeSafeNoteModal;
-  el("safeNoteSave").onclick = async () => {
-    if (!state.safe.selectedVaultId) {
-      notify("Select a vault first.", "info");
-      return;
-    }
-    const title = el("safeNoteTitle").value.trim();
-    const note = el("safeNoteContent").value.trim();
-    if (!title) {
-      notify("Note title is required.", "error");
-      return;
-    }
-    try {
-      const result = await apiCall("safe_cli_create_note", String(state.safe.selectedVaultId), title, note);
-      if (!result?.ok) {
-        throw new Error(result?.error || "Create note failed");
-      }
-      closeSafeNoteModal();
-      await loadSafeItems();
-      renderSafePanel();
-      notify("Secure note created.", "success");
-    } catch (error) {
-      notify(`Failed to create note: ${error.message}`, "error");
-    }
-  };
-
   el("modalBackdrop").onclick = closeModal;
   el("modalClose").onclick = closeModal;
   el("taskCancel").onclick = closeModal;
@@ -2623,6 +2568,9 @@ function initUI() {
       if (!state.search.open) openSearchModal();
       return;
     }
+    if (tryHandleGlobalWorkspaceTabArrows(event)) {
+      return;
+    }
     if (event.key === "Escape" && state.modal.open) {
       closeModal();
       return;
@@ -2651,32 +2599,107 @@ function initUI() {
       closeSettingsModal();
       return;
     }
-    if (event.key === "Escape" && state.safeNoteModal.open) {
-      closeSafeNoteModal();
+    if (event.key === "Escape" && state.taskReview.open) {
+      closeTaskReviewModal();
       return;
     }
     if (event.key === "Escape" && state.launcherContext.open) {
       closeLauncherContextMenu();
       return;
     }
+    if (state.taskReview.open && !state.textModal.open) {
+      if (event.key === "j" || event.key === "J") {
+        event.preventDefault();
+        stepTaskReview(1);
+        return;
+      }
+      if (event.key === "k" || event.key === "K") {
+        event.preventDefault();
+        stepTaskReview(-1);
+        return;
+      }
+      if (event.key === "PageDown") {
+        event.preventDefault();
+        stepTaskReview(1);
+        return;
+      }
+      if (event.key === "PageUp") {
+        event.preventDefault();
+        stepTaskReview(-1);
+        return;
+      }
+    }
+    if (
+      state.search.open &&
+      !state.textModal.open &&
+      !state.confirmModal.open &&
+      event.target &&
+      event.target.id === "searchInput"
+    ) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        if (state.search.visibleResults.length) {
+          state.search.selectedIndex = Math.min(
+            state.search.visibleResults.length - 1,
+            state.search.selectedIndex + 1,
+          );
+          renderSearchResults(el("searchInput").value || "");
+        }
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        if (state.search.visibleResults.length) {
+          state.search.selectedIndex = Math.max(0, state.search.selectedIndex - 1);
+          renderSearchResults(el("searchInput").value || "");
+        }
+        return;
+      }
+      if (event.key === "Enter") {
+        const entry = state.search.visibleResults[state.search.selectedIndex];
+        if (entry) {
+          event.preventDefault();
+          handleSearchResultEntry(entry).catch((error) => {
+            console.error(error);
+            notify(`Search action failed: ${error.message}`, "error");
+          });
+        }
+        return;
+      }
+    }
     if (event.key === "Enter" && state.textModal.open) {
       event.preventDefault();
-      const value = el("textModalInput").value.trim();
-      closeTextModal(value || null);
+      const input = el("textModalInput");
+      const raw = input.value;
+      const value = input.type === "password" ? raw : raw.trim();
+      closeTextModal(value);
     }
   });
 
   el("searchBackdrop").onclick = closeSearchModal;
+  el("searchScopeAll").onclick = () => {
+    state.search.scope = "all";
+    syncSearchScopeButtons();
+    state.search.selectedIndex = 0;
+    renderSearchResults(el("searchInput").value || "");
+  };
+  el("searchScopeCurrent").onclick = () => {
+    state.search.scope = "current";
+    syncSearchScopeButtons();
+    state.search.selectedIndex = 0;
+    renderSearchResults(el("searchInput").value || "");
+  };
   el("searchInput").addEventListener("input", (event) => {
+    state.search.selectedIndex = 0;
     renderSearchResults(event.target.value || "");
   });
   el("searchResults").addEventListener("click", (event) => {
-    const btn = event.target.closest("[data-search-kind]");
+    const btn = event.target.closest("[data-search-index]");
     if (!btn) return;
-    const kind = btn.dataset.searchKind;
-    const id = Number(btn.dataset.searchId);
-    const workspaceId = Number(btn.dataset.searchWorkspaceId);
-    handleSearchResultClick(kind, id, workspaceId).catch((error) => {
+    const idx = Number(btn.dataset.searchIndex);
+    const entry = state.search.visibleResults[idx];
+    if (!entry) return;
+    handleSearchResultEntry(entry).catch((error) => {
       console.error(error);
       notify(`Search action failed: ${error.message}`, "error");
     });
@@ -2721,12 +2744,55 @@ function initUI() {
       notify(`Failed to pick icon: ${error.message}`, "error");
     }
   };
+
+  el("crudImportWorkspace").addEventListener("change", async () => {
+    if (!state.crud.open || (state.crud.kind !== "app" && state.crud.kind !== "resource")) return;
+    const wsId = el("crudImportWorkspace").value;
+    const itemSel = el("crudImportItem");
+    const applyBtn = el("crudImportApply");
+    itemSel.innerHTML = '<option value="">— Select item —</option>';
+    state.crud.importList = [];
+    applyBtn.disabled = true;
+    if (!wsId) {
+      itemSel.disabled = true;
+      return;
+    }
+    try {
+      if (state.crud.kind === "app") {
+        state.crud.importList = await apiCall("get_apps", Number(wsId));
+      } else {
+        state.crud.importList = await apiCall("get_resources", Number(wsId));
+      }
+      state.crud.importList.forEach((ent) => {
+        const cat = ent.category || "Uncategorized";
+        itemSel.innerHTML += `<option value="${ent.id}">${escapeHtml(`${ent.name} (${cat})`)}</option>`;
+      });
+      if (state.crud.importList.length === 0) {
+        itemSel.innerHTML = '<option value="">(No items in this workspace)</option>';
+        itemSel.disabled = true;
+      } else {
+        itemSel.disabled = false;
+      }
+    } catch (error) {
+      notify(error.message || String(error), "error");
+      itemSel.disabled = true;
+    }
+  });
+  el("crudImportItem").addEventListener("change", () => {
+    const itemSel = el("crudImportItem");
+    const v = itemSel.value;
+    el("crudImportApply").disabled = !v || itemSel.disabled;
+  });
+  el("crudImportApply").onclick = () => applyCrudImportFromSelection();
+
   el("textBackdrop").onclick = () => closeTextModal(null);
   el("textModalClose").onclick = () => closeTextModal(null);
   el("textCancel").onclick = () => closeTextModal(null);
   el("textSave").onclick = () => {
-    const value = el("textModalInput").value.trim();
-    closeTextModal(value || null);
+    const input = el("textModalInput");
+    const raw = input.value;
+    const value = input.type === "password" ? raw : raw.trim();
+    closeTextModal(value);
   };
   el("confirmBackdrop").onclick = () => closeConfirmModal(false);
   el("confirmModalClose").onclick = () => closeConfirmModal(false);
@@ -2770,26 +2836,88 @@ function initUI() {
       notify(`Failed to update hotkey setting: ${error.message}`, "error");
     }
   });
-  el("safeLockPinSaveBtn").onclick = async () => {
-    const a = el("safeLockPinNew").value;
-    const b = el("safeLockPinConfirm").value;
-    if (a !== b) {
-      notify("PIN fields do not match.", "error");
+  el("settingsLoadDefaultCssBtn").onclick = async () => {
+    const ta = el("settingsCustomCss");
+    if (!ta) return;
+    const cur = ta.value.trim();
+    if (cur && !window.confirm("Replace the editor contents with the bundled default stylesheet?")) return;
+    try {
+      const res = await apiCall("get_default_ui_css");
+      if (!res?.ok) throw new Error(res?.error || "Could not read default CSS");
+      ta.value = res.css ?? "";
+      notify("Loaded default CSS into the editor (not saved yet).", "info");
+    } catch (error) {
+      notify(error.message || String(error), "error");
+    }
+  };
+  el("settingsSaveCustomCssBtn").onclick = async () => {
+    const ta = el("settingsCustomCss");
+    if (!ta) return;
+    try {
+      const res = await apiCall("set_ui_custom_css", ta.value);
+      if (!res?.ok) throw new Error(res?.error || "Save failed");
+      injectUserCss(ta.value);
+      notify("Custom CSS saved.", "success");
+    } catch (error) {
+      notify(error.message || String(error), "error");
+    }
+  };
+  el("settingsClearCustomCssBtn").onclick = async () => {
+    try {
+      const res = await apiCall("clear_ui_custom_css");
+      if (!res?.ok) throw new Error(res?.error || "Clear failed");
+      injectUserCss("");
+      window.location.reload();
+    } catch (error) {
+      notify(error.message || String(error), "error");
+    }
+  };
+  el("settingsExportJsonBtn").onclick = async () => {
+    try {
+      const json = await apiCall("export_data_json");
+      const blob = new Blob([json], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `commandcentre-export-${localTodayISO()}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      notify("Export saved.", "success");
+    } catch (error) {
+      notify(`Export failed: ${error.message}`, "error");
+    }
+  };
+  el("settingsImportJsonBtn").onclick = () => {
+    el("settingsImportFile").click();
+  };
+  el("settingsImportFile").addEventListener("change", async (ev) => {
+    const file = ev.target.files?.[0];
+    ev.target.value = "";
+    if (!file) return;
+    let text;
+    try {
+      text = await file.text();
+    } catch (error) {
+      notify(`Could not read file: ${error.message}`, "error");
       return;
     }
-    if (!a) {
-      notify("Enter and confirm a new PIN.", "error");
+    const typed = await openTextModal({
+      title: "Confirm destructive import",
+      label: 'Type REPLACE to erase all data and load this file',
+      value: "",
+    });
+    if (typed !== "REPLACE") {
+      notify("Import cancelled.", "info");
       return;
     }
     try {
-      await apiCall("set_safe_lock_pin", a);
-      const settings = await apiCall("get_integration_settings");
-      updateSafeLockPinSettingsUI(settings);
-      notify("Safe PIN saved.", "success");
+      const res = await apiCall("import_data_json", text, "replace");
+      if (!res?.ok) throw new Error(res?.error || "Import failed");
+      notify("Import complete.", "success");
+      await bootstrap();
     } catch (error) {
-      notify(`Failed to save PIN: ${error.message}`, "error");
+      notify(`Import failed: ${error.message}`, "error");
     }
-  };
+  });
   el("workspaceSettingsList").addEventListener("click", async (event) => {
     const iconBtn = event.target.closest("[data-edit-workspace-icon]");
     const renameBtn = event.target.closest("[data-rename-workspace]");
@@ -2858,7 +2986,6 @@ function initUI() {
         state.activeWorkspaceId = state.workspaces[0].id;
       }
       await loadWorkspaceData();
-      await applyWorkspaceSafePreference();
       renderAll();
       renderWorkspaceSettingsList();
       notify("Workspace deleted.", "success");
@@ -2884,7 +3011,6 @@ function initUI() {
       state.workspaces = await apiCall("get_workspaces");
       state.activeWorkspaceId = state.workspaces[state.workspaces.length - 1].id;
       await loadWorkspaceData();
-      await applyWorkspaceSafePreference();
       renderAll();
     } catch (error) {
       console.error(error);
@@ -2951,10 +3077,27 @@ function initUI() {
     openCrudModal("global_tray_app", "create");
   };
 
+  el("addGlobalTrayDividerBtn").onclick = async () => {
+    const label = await openTextModal({
+      title: "New divider",
+      label: "Optional label (leave blank for default)",
+      value: "",
+    });
+    if (label === null) return;
+    try {
+      await apiCall("create_global_tray_divider", label || "");
+      await loadWorkspaceData();
+    } catch (error) {
+      notify(`Failed to add divider: ${error.message}`, "error");
+    }
+  };
+
   el("globalTrayAppsRow").addEventListener("click", async (event) => {
     closeLauncherContextMenu();
     const launchBtn = event.target.closest("[data-launch-global-tray-app]");
     if (!launchBtn) return;
+    const tile = launchBtn.closest("[data-global-tray-tile]");
+    if (tile?.dataset.globalTrayEntryType === "divider") return;
     const appId = Number(launchBtn.dataset.launchGlobalTrayApp);
     if (!appId) return;
     const app = state.globalTrayApps?.find((a) => a.id === appId);
@@ -2973,7 +3116,8 @@ function initUI() {
     event.preventDefault();
     const appId = Number(tile.dataset.globalTrayTile);
     if (!appId) return;
-    openLauncherContextMenu(appId, event.clientX, event.clientY, "global_tray");
+    const et = tile.dataset.globalTrayEntryType || "app";
+    openLauncherContextMenu(appId, event.clientX, event.clientY, "global_tray", et);
   });
 
   el("addResourceBtn").onclick = async () => {
@@ -2985,7 +3129,7 @@ function initUI() {
     closeLauncherContextMenu();
     const toggleAppCategoryBtn = event.target.closest("[data-toggle-app-category]");
     if (toggleAppCategoryBtn) {
-      const category = toggleAppCategoryBtn.dataset.toggleAppCategory;
+      const category = decodeURIComponent(toggleAppCategoryBtn.dataset.toggleAppCategory || "");
       state.dashboard.appCategoriesCollapsed[category] = !state.dashboard.appCategoriesCollapsed[category];
       renderDashboard(state.lastApps || [], state.lastResources || []);
       return;
@@ -3010,6 +3154,14 @@ function initUI() {
 
   });
   el("appsList").addEventListener("contextmenu", (event) => {
+    const hdr = event.target.closest("[data-app-category-header]");
+    if (hdr) {
+      event.preventDefault();
+      const category = decodeURIComponent(hdr.dataset.toggleAppCategory || "");
+      if (!state.activeWorkspaceId) return;
+      openCrudModal("app", "create", null, { category });
+      return;
+    }
     const tile = event.target.closest("[data-app-tile]");
     if (!tile) return;
     event.preventDefault();
@@ -3018,6 +3170,10 @@ function initUI() {
     openLauncherContextMenu(appId, event.clientX, event.clientY);
   });
   document.addEventListener("click", (event) => {
+    const colMenu = el("columnContextMenu");
+    if (colMenu && !colMenu.classList.contains("hidden") && !colMenu.contains(event.target)) {
+      closeColumnContextMenu();
+    }
     if (!state.launcherContext.open) return;
     const menu = el("launcherContextMenu");
     if (menu && menu.contains(event.target)) return;
@@ -3073,11 +3229,46 @@ function initUI() {
       notify(`Failed to delete app: ${error.message}`, "error");
     }
   };
+  el("launcherContextRemoveDivider").onclick = async () => {
+    const appId = Number(state.launcherContext.appId);
+    closeLauncherContextMenu();
+    const row = state.globalTrayApps?.find((a) => a.id === appId);
+    if (!row) return;
+    const ok = await openConfirmModal({
+      title: "Remove divider",
+      message: "Remove this tray divider?",
+    });
+    if (!ok) return;
+    try {
+      await apiCall("delete_global_tray_app", appId);
+      await loadWorkspaceData();
+    } catch (error) {
+      notify(`Failed to remove divider: ${error.message}`, "error");
+    }
+  };
+  el("launcherContextAddDividerAfter").onclick = async () => {
+    const afterId = Number(state.launcherContext.appId);
+    closeLauncherContextMenu();
+    const oldIds = (state.globalTrayApps || []).map((a) => a.id);
+    try {
+      const created = await apiCall("create_global_tray_divider", "");
+      const newId = created?.id;
+      if (!newId) throw new Error("No divider id returned");
+      const idx = oldIds.indexOf(afterId);
+      const next =
+        idx >= 0 ? [...oldIds.slice(0, idx + 1), newId, ...oldIds.slice(idx + 1)] : [...oldIds, newId];
+      const result = await apiCall("reorder_global_tray_apps", next);
+      if (result && result.ok === false) throw new Error(result.error || "Reorder failed");
+      await loadWorkspaceData();
+    } catch (error) {
+      notify(`Failed to add divider: ${error.message}`, "error");
+    }
+  };
 
   el("resourcesList").addEventListener("click", async (event) => {
     const toggleResourceCategoryBtn = event.target.closest("[data-toggle-resource-category]");
     if (toggleResourceCategoryBtn) {
-      const category = toggleResourceCategoryBtn.dataset.toggleResourceCategory;
+      const category = decodeURIComponent(toggleResourceCategoryBtn.dataset.toggleResourceCategory || "");
       state.dashboard.resourceCategoriesCollapsed[category] =
         !state.dashboard.resourceCategoriesCollapsed[category];
       renderDashboard(state.lastApps || [], state.lastResources || []);
@@ -3126,6 +3317,14 @@ function initUI() {
     }
 
     openCrudModal("resource", "edit", resource);
+  });
+  el("resourcesList").addEventListener("contextmenu", (event) => {
+    const hdr = event.target.closest("[data-resource-category-header]");
+    if (!hdr) return;
+    event.preventDefault();
+    const category = decodeURIComponent(hdr.dataset.toggleResourceCategory || "");
+    if (!state.activeWorkspaceId) return;
+    openCrudModal("resource", "create", null, { category });
   });
 
   bootstrap().catch((error) => {

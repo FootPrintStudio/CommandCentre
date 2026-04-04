@@ -60,6 +60,7 @@ def test_global_tray_apps_not_scoped_to_workspace():
     assert rows[0]["name"] == "Notes"
     assert rows[0]["command_path"] == "gedit"
     assert rows[0]["sort_order"] == 0
+    assert rows[0].get("entry_type") == "app"
 
     api.update_global_tray_app(created["id"], "Notes2", "gedit", "Tools", "unicode", "📓")
     rows2 = api.get_global_tray_apps()
@@ -115,4 +116,88 @@ def test_kanban_done_column_flag_single_workspace():
     by_id = {c["id"]: c for c in cols2}
     assert by_id[todo_col["id"]]["is_done"] == 1
     assert by_id[done_col["id"]]["is_done"] == 0
+
+
+def test_global_tray_divider_create_and_reorder():
+    initialize_database()
+    api = CommandCentreAPI()
+    a = api.create_global_tray_app("A", "a", "U", "unicode", "a")["id"]
+    d = api.create_global_tray_divider("Sep")["id"]
+    b = api.create_global_tray_app("B", "b", "U", "unicode", "b")["id"]
+    rows = api.get_global_tray_apps()
+    ids_all = [r["id"] for r in rows]
+    assert ids_all.index(a) < ids_all.index(d) < ids_all.index(b)
+    by_id = {r["id"]: r for r in rows}
+    assert by_id[d]["entry_type"] == "divider"
+    rest = [i for i in ids_all if i not in (a, d, b)]
+    new_order = rest + [b, d, a]
+    assert api.reorder_global_tray_apps(new_order) == {"ok": True}
+    assert [r["id"] for r in api.get_global_tray_apps()] == new_order
+
+
+def test_export_import_json_roundtrip():
+    initialize_database()
+    api = CommandCentreAPI()
+    ws = api.create_workspace("ExportMe", "🖿")["id"]
+    api.create_app(ws, "App1", "true", "Cat", "unicode", "x")
+    raw = api.export_data_json()
+    data = __import__("json").loads(raw)
+    assert data["version"] == 1
+    assert any(w["name"] == "ExportMe" for w in data["workspaces"])
+    other = CommandCentreAPI()
+    assert other.import_data_json(raw, "replace") == {"ok": True}
+    w2 = other.get_workspaces()
+    assert any(w["name"] == "ExportMe" for w in w2)
+
+
+def test_ui_custom_css_roundtrip():
+    initialize_database()
+    api = CommandCentreAPI()
+    assert api.get_ui_custom_css() == {"ok": True, "css": ""}
+    assert api.set_ui_custom_css("body { margin: 0; }") == {"ok": True}
+    assert api.get_ui_custom_css() == {"ok": True, "css": "body { margin: 0; }"}
+    assert api.clear_ui_custom_css() == {"ok": True}
+    assert api.get_ui_custom_css() == {"ok": True, "css": ""}
+
+
+def test_get_default_ui_css_reads_bundled_file():
+    initialize_database()
+    api = CommandCentreAPI()
+    res = api.get_default_ui_css()
+    assert res.get("ok") is True
+    text = res.get("css") or ""
+    assert ":root" in text
+    assert ".cc-switch" in text or ".cc-modal-panel" in text
+
+
+def test_set_ui_custom_css_rejects_oversized():
+    initialize_database()
+    api = CommandCentreAPI()
+    huge = "x" * (256 * 1024 + 1)
+    out = api.set_ui_custom_css(huge)
+    assert out.get("ok") is False
+    assert "maximum" in (out.get("error") or "").lower()
+
+
+def test_get_task_review_queue_excludes_done_and_includes_due_and_critical():
+    initialize_database()
+    api = CommandCentreAPI()
+    ws = api.create_workspace("R", "🖿")["id"]
+    cols = api.get_kanban_columns(ws)
+    todo = next(c for c in cols if c["name"] == "To Do")
+    done = next(c for c in cols if c["name"] == "Done")
+    from datetime import date
+
+    today = date.today().isoformat()
+    api.create_task(ws, todo["id"], "Due today", "", "medium", "[]", "[]", "[]", "[]", today, "none")
+    api.create_task(ws, todo["id"], "Critical open", "", "critical", "[]", "[]", "[]", "[]", "", "none")
+    tid_done = api.create_task(ws, done["id"], "Due but done col", "", "medium", "[]", "[]", "[]", "[]", today, "none")[
+        "id"
+    ]
+    q = api.get_task_review_queue()
+    assert q["ok"] is True
+    titles = {item["title"] for item in q["items"]}
+    assert "Due today" in titles
+    assert "Critical open" in titles
+    assert tid_done not in {item["task_id"] for item in q["items"]}
 

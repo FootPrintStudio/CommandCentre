@@ -21,13 +21,25 @@ rm -rf .venv
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
 python -m pip install -r commandcentre/requirements.txt
+# Optional: register the package so `python -m commandcentre` works from any directory
+python -m pip install -e ".[dev]"
 ```
 
 ### 3) Run
 
+From the **repository root** (the directory that contains the `commandcentre` package folder):
+
+```bash
+python -m commandcentre
+```
+
+Equivalent:
+
 ```bash
 python -m commandcentre.main
 ```
+
+If you see `ModuleNotFoundError: No module named 'webview'`, install dependencies (step 2). If you see `No module named 'commandcentre'`, run from the repo root or install once in editable mode: `pip install -e ".[dev]"` (uses `pyproject.toml`).
 
 ### 4) Run tests
 
@@ -43,7 +55,7 @@ One workable combo is `qtpy` + `PyQt6`:
 ```bash
 source .venv/bin/activate
 python -m pip install qtpy PyQt6
-python -m commandcentre.main
+python -m commandcentre
 ```
 
 # CommandCentre

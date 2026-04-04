@@ -4,281 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CommandCentre</title>
-    <style>
-      /* Slide toggles (checkboxes styled as switches) */
-      .cc-switch {
-        position: relative;
-        display: inline-flex;
-        flex-shrink: 0;
-        cursor: pointer;
-        align-items: center;
-        vertical-align: middle;
-      }
-      .cc-switch input {
-        position: absolute;
-        opacity: 0;
-        width: 0;
-        height: 0;
-        margin: 0;
-      }
-      .cc-switch .cc-switch-track {
-        display: block;
-        width: 2.75rem;
-        height: 1.5rem;
-        border-radius: 9999px;
-        background: rgb(51 65 85);
-        transition: background 0.2s ease;
-        position: relative;
-      }
-      .cc-switch input:focus-visible + .cc-switch-track {
-        outline: 2px solid rgb(56 189 248 / 0.45);
-        outline-offset: 2px;
-      }
-      .cc-switch input:checked + .cc-switch-track {
-        background: rgb(5 150 105);
-      }
-      .cc-switch .cc-switch-track::after {
-        content: "";
-        position: absolute;
-        left: 2px;
-        top: 2px;
-        width: 1.25rem;
-        height: 1.25rem;
-        border-radius: 9999px;
-        background: white;
-        box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
-        transition: transform 0.2s ease;
-      }
-      .cc-switch input:checked + .cc-switch-track::after {
-        transform: translateX(1.25rem);
-      }
-      .cc-switch input:disabled + .cc-switch-track {
-        opacity: 0.45;
-        cursor: not-allowed;
-      }
-
-      /* Kanban — due / recurring today */
-      @keyframes cc-task-due-pulse {
-        0%,
-        100% {
-          box-shadow:
-            0 0 0 1px rgba(56, 189, 248, 0.45),
-            0 0 10px rgba(56, 189, 248, 0.12);
-        }
-        50% {
-          box-shadow:
-            0 0 0 2px rgba(56, 189, 248, 0.85),
-            0 0 18px rgba(56, 189, 248, 0.35);
-        }
-      }
-      .task-card-due-pulse {
-        animation: cc-task-due-pulse 1.6s ease-in-out infinite;
-      }
-
-      /* Kanban task card — markdown (marked output); mirrors modal richness at compact scale */
-      .task-card-md {
-        font-size: 11px;
-        line-height: 1.45;
-        color: rgb(203 213 225);
-      }
-      .task-card-md > :first-child {
-        margin-top: 0;
-      }
-      .task-card-md > :last-child {
-        margin-bottom: 0;
-      }
-      .task-card-md h1,
-      .task-card-md h2,
-      .task-card-md h3,
-      .task-card-md h4,
-      .task-card-md h5,
-      .task-card-md h6 {
-        color: rgb(241 245 249);
-        font-weight: 600;
-        line-height: 1.25;
-        margin: 0.65em 0 0.35em;
-      }
-      .task-card-md h1 {
-        font-size: 1.35em;
-      }
-      .task-card-md h2 {
-        font-size: 1.22em;
-      }
-      .task-card-md h3 {
-        font-size: 1.12em;
-      }
-      .task-card-md h4 {
-        font-size: 1.06em;
-      }
-      .task-card-md h5,
-      .task-card-md h6 {
-        font-size: 1em;
-        color: rgb(226 232 240);
-      }
-      .task-card-md p {
-        margin: 0.4em 0;
-      }
-      .task-card-md strong {
-        color: rgb(241 245 249);
-        font-weight: 600;
-      }
-      .task-card-md em {
-        font-style: italic;
-      }
-      .task-card-md del,
-      .task-card-md s {
-        color: rgb(148 163 184);
-        text-decoration: line-through;
-      }
-      .task-card-md a {
-        color: rgb(56 189 248);
-        text-decoration: underline;
-        text-underline-offset: 2px;
-      }
-      .task-card-md a:hover {
-        color: rgb(125 211 252);
-      }
-      .task-card-md ul,
-      .task-card-md ol {
-        margin: 0.35em 0;
-        padding-left: 1.2em;
-      }
-      .task-card-md ul {
-        list-style-type: disc;
-      }
-      .task-card-md ol {
-        list-style-type: decimal;
-      }
-      .task-card-md li {
-        margin: 0.2em 0;
-      }
-      .task-card-md li > ul,
-      .task-card-md li > ol {
-        margin: 0.15em 0;
-      }
-      .task-card-md blockquote {
-        margin: 0.45em 0;
-        padding: 0.35em 0 0.35em 0.65em;
-        border-left: 3px solid rgb(71 85 105);
-        color: rgb(186 199 216);
-        background: rgb(15 23 42 / 0.45);
-        border-radius: 0 4px 4px 0;
-      }
-      .task-card-md blockquote > :first-child {
-        margin-top: 0;
-      }
-      .task-card-md blockquote > :last-child {
-        margin-bottom: 0;
-      }
-      .task-card-md hr {
-        margin: 0.65em 0;
-        border: none;
-        border-top: 1px solid rgb(51 65 85);
-      }
-      .task-card-md code {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.92em;
-        background: rgb(15 23 42);
-        border: 1px solid rgb(51 65 85);
-        border-radius: 3px;
-        padding: 0.08em 0.28em;
-        color: rgb(226 232 240);
-      }
-      .task-card-md pre {
-        margin: 0.45em 0;
-        padding: 0.45em 0.55em;
-        overflow-x: auto;
-        border-radius: 4px;
-        border: 1px solid rgb(51 65 85);
-        background: rgb(15 23 42);
-        font-size: 0.95em;
-        line-height: 1.4;
-      }
-      .task-card-md pre code {
-        display: block;
-        padding: 0;
-        border: none;
-        background: none;
-        font-size: inherit;
-        color: rgb(203 213 225);
-        white-space: pre;
-        overflow-x: auto;
-      }
-      .task-card-md table {
-        border-collapse: collapse;
-        margin: 0.5em 0;
-        font-size: inherit;
-        min-width: 100%;
-        width: max-content;
-      }
-      .task-card-md thead {
-        border-bottom: 2px solid rgb(71 85 105);
-      }
-      .task-card-md th,
-      .task-card-md td {
-        border: 1px solid rgb(51 65 85);
-        padding: 0.28em 0.45em;
-        text-align: left;
-        vertical-align: top;
-      }
-      .task-card-md th {
-        background: rgb(15 23 42 / 0.85);
-        color: rgb(241 245 249);
-        font-weight: 600;
-      }
-      .task-card-md tbody tr:nth-child(even) {
-        background: rgb(15 23 42 / 0.35);
-      }
-      .task-card-md img {
-        max-width: 100%;
-        height: auto;
-        border-radius: 4px;
-        margin: 0.35em 0;
-      }
-      .task-card-md input[type="checkbox"] {
-        margin-right: 0.35em;
-        vertical-align: middle;
-      }
-
-      /* Launcher: column count follows each category card width (not viewport). Min 4 columns. */
-      .cc-launcher-category {
-        container-type: inline-size;
-        container-name: cc-launcher;
-      }
-      .cc-launcher-grid {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        column-gap: 0.25rem;
-        row-gap: 0.5rem;
-        align-items: start;
-      }
-      @container cc-launcher (min-width: 36rem) {
-        .cc-launcher-grid {
-          grid-template-columns: repeat(5, minmax(0, 1fr));
-        }
-      }
-      @container cc-launcher (min-width: 48rem) {
-        .cc-launcher-grid {
-          grid-template-columns: repeat(6, minmax(0, 1fr));
-        }
-      }
-      @container cc-launcher (min-width: 60rem) {
-        .cc-launcher-grid {
-          grid-template-columns: repeat(7, minmax(0, 1fr));
-        }
-      }
-      @container cc-launcher (min-width: 72rem) {
-        .cc-launcher-grid {
-          grid-template-columns: repeat(8, minmax(0, 1fr));
-        }
-      }
-    </style>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="./assets/css/commandcentre-default.css" />
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script defer src="./assets/js/app.js"></script>
   </head>
-  <body class="bg-slate-950 text-slate-100 h-screen overflow-hidden">
-    <header class="border-b border-slate-800 p-3 flex items-center gap-2">
+  <body class="cc-app h-screen overflow-hidden">
+    <header class="cc-header">
       <div
         id="workspaceTabs"
         class="flex min-w-0 flex-1 gap-2 overflow-x-auto scroll-smooth"
@@ -286,20 +18,17 @@
       ></div>
       <div
         id="workspaceLoadingIndicator"
-        class="hidden shrink-0 items-center gap-2 text-xs text-slate-400"
+        class="hidden shrink-0 items-center gap-2 text-xs cc-muted"
         role="status"
         aria-live="polite"
       >
-        <span
-          class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400"
-          aria-hidden="true"
-        ></span>
+        <span class="cc-loading-spinner" aria-hidden="true"></span>
         <span>Loading workspace…</span>
       </div>
       <button
         id="newWorkspaceBtn"
         type="button"
-        class="ml-2 shrink-0 rounded bg-blue-600 px-2.5 py-1 text-base font-semibold leading-none hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+        class="cc-btn cc-btn-new-ws ml-2 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
         title="New workspace"
         aria-label="New workspace"
       >
@@ -307,9 +36,18 @@
       </button>
       <div class="ml-auto flex items-center gap-2">
         <button
+          id="openTaskReviewBtn"
+          type="button"
+          class="cc-btn cc-btn-secondary cc-btn--header"
+          title="Review tasks due today and critical across workspaces"
+          aria-label="Task review"
+        >
+          Review
+        </button>
+        <button
           id="openSearchBtn"
           type="button"
-          class="rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700"
+          class="cc-btn cc-btn-secondary cc-btn--header"
           title="Search"
           aria-label="Search"
         >
@@ -318,7 +56,7 @@
         <button
           id="showDashboard"
           type="button"
-          class="rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700"
+          class="cc-btn cc-btn-secondary cc-btn--header"
           title="Dashboard"
           aria-label="Dashboard"
         >
@@ -327,7 +65,7 @@
         <button
           id="showKanban"
           type="button"
-          class="rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700"
+          class="cc-btn cc-btn-secondary cc-btn--header"
           title="Kanban"
           aria-label="Kanban"
         >
@@ -336,7 +74,7 @@
         <button
           id="openSettingsBtn"
           type="button"
-          class="rounded bg-slate-800 px-2.5 py-1 text-base leading-none hover:bg-slate-700"
+          class="cc-btn cc-btn-secondary cc-btn--icon"
           title="Settings"
           aria-label="Settings"
         >
@@ -345,188 +83,131 @@
       </div>
     </header>
 
-    <main class="p-4 h-[calc(100vh-64px)] overflow-hidden">
+    <main class="cc-main">
       <section id="dashboardView" class="h-full overflow-hidden flex flex-col gap-3">
         <div id="dashboardScrollable" class="flex-1 overflow-y-auto flex flex-col gap-3">
           <div class="shrink-0 text-center">
-            <time
-              id="dashboardClock"
-              class="inline-block text-lg font-medium tabular-nums tracking-tight text-slate-200 sm:text-xl md:text-2xl"
-              datetime=""
-            ></time>
+            <time id="dashboardClock" class="cc-clock" datetime=""></time>
           </div>
-          <div class="rounded border border-slate-800 p-3 flex flex-col bg-slate-950/95 shrink-0">
+          <div class="cc-dashboard-panel shrink-0">
             <div class="flex items-center justify-between mb-2 gap-2">
-              <h2 class="text-lg font-semibold text-slate-100">Universal Tray</h2>
-              <button
-                id="addGlobalTrayAppBtn"
-                type="button"
-                class="shrink-0 rounded bg-emerald-700 px-2 py-1 text-xs hover:bg-emerald-600"
-              >
-                + App
-              </button>
+              <h2 class="cc-section-title">Universal Tray</h2>
+              <div class="flex shrink-0 items-center gap-1.5">
+                <button
+                  id="addGlobalTrayDividerBtn"
+                  type="button"
+                  class="cc-btn cc-btn-muted cc-btn--sm"
+                  title="Add a visual separator"
+                >
+                  + Divider
+                </button>
+                <button id="addGlobalTrayAppBtn" type="button" class="cc-btn cc-btn-primary cc-btn--sm">+ App</button>
+              </div>
             </div>
             <div
               id="globalTrayAppsRow"
               class="flex flex-nowrap items-start gap-3 overflow-x-auto pb-1 min-h-[4.25rem]"
             >
-              <span class="text-sm text-slate-400">Loading…</span>
+              <span class="text-sm cc-muted">Loading…</span>
             </div>
           </div>
-          <div class="rounded border border-slate-800 p-3 flex flex-col bg-slate-950/95">
-          <div class="flex items-center justify-between mb-2">
-            <h2
-              id="launcherSectionTitle"
-              class="text-lg font-semibold cursor-pointer select-none hover:text-slate-100"
-              title="Click to expand or collapse"
-              role="button"
-              tabindex="0"
-            >
-              Launcher
-            </h2>
-            <div class="flex items-center gap-2">
-              <button id="addAppBtn" class="rounded bg-emerald-700 px-2 py-1 text-xs hover:bg-emerald-600">+ App</button>
-            </div>
-          </div>
-          <div id="launcherContent">
-            <div id="appsList" class="text-sm text-slate-300">No apps yet.</div>
-          </div>
-          </div>
-          <div class="rounded border border-slate-800 p-3 flex flex-col bg-slate-950/95">
-          <div class="flex items-center justify-between mb-2">
-            <h2
-              id="librarySectionTitle"
-              class="text-lg font-semibold cursor-pointer select-none hover:text-slate-100"
-              title="Click to expand or collapse"
-              role="button"
-              tabindex="0"
-            >
-              Library
-            </h2>
-            <div class="flex items-center gap-2">
-              <button id="addResourceBtn" class="rounded bg-emerald-700 px-2 py-1 text-xs hover:bg-emerald-600">+ Resource</button>
-            </div>
-          </div>
-          <div id="libraryContent">
-            <div id="resourcesList" class="text-sm text-slate-300">No resources yet.</div>
-          </div>
-          </div>
-        </div>
-        <div class="rounded border border-slate-800 p-3 bg-slate-950/98 backdrop-blur">
-          <div class="flex items-center justify-between mb-2 gap-2">
-            <div class="flex items-center gap-1.5 min-w-0 flex-1">
+          <div class="cc-dashboard-panel">
+            <div class="flex items-center justify-between mb-2">
               <h2
-                id="safeSectionTitle"
-                class="text-lg font-semibold cursor-pointer select-none hover:text-slate-100"
+                id="launcherSectionTitle"
+                class="cc-section-title cc-section-title--interactive"
                 title="Click to expand or collapse"
                 role="button"
                 tabindex="0"
               >
-                Safe
+                Launcher
               </h2>
-              <button
-                type="button"
-                id="safeLockBtn"
-                class="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                title="Lock Safe (collapse and require password to reopen)"
-                aria-label="Lock Safe"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-5 w-5" aria-hidden="true">
-                  <path fill-rule="evenodd" d="M12 1.5a5.25 5.25 0 0 0-5.25 5.25v3a3 3 0 0 0-3 3v6.75a3 3 0 0 0 3 3h10.5a3 3 0 0 0 3-3v-6.75a3 3 0 0 0-3-3v-3c0-2.9-2.35-5.25-5.25-5.25Zm3.75 8.25v-3a3.75 3.75 0 1 0-7.5 0v3h7.5Z" clip-rule="evenodd" />
-                </svg>
-              </button>
+              <div class="flex items-center gap-2">
+                <button id="addAppBtn" type="button" class="cc-btn cc-btn-primary cc-btn--sm">+ App</button>
+              </div>
             </div>
-            <div class="flex items-center gap-2">
-              <button id="safeCreateNoteBtn" class="rounded bg-emerald-700 px-2 py-1 text-xs hover:bg-emerald-600">New Note</button>
-              <button id="safeRefreshBtn" class="rounded bg-slate-800 px-2 py-1 text-xs hover:bg-slate-700">Refresh</button>
+            <div id="launcherContent">
+              <div id="appsList" class="text-sm text-slate-300">No apps yet.</div>
             </div>
           </div>
-          <div id="safeContent">
-            <p id="safeStatus" class="text-xs text-slate-400 mb-2">Checking Proton Pass CLI status...</p>
-            <div id="safeContainer" class="rounded border border-slate-800 p-3 bg-slate-900 space-y-3">
-              <div class="grid grid-cols-1 gap-3 md:grid-cols-12 md:gap-4 md:items-end">
-                <div class="flex min-w-0 flex-col gap-1 md:col-span-4">
-                  <label for="safeVaultSelect" class="text-xs font-medium text-slate-300">Vault</label>
-                  <select
-                    id="safeVaultSelect"
-                    class="h-9 w-full rounded-md border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 shadow-sm focus:border-slate-600 focus:outline-none focus:ring-1 focus:ring-slate-600"
-                  ></select>
-                </div>
-                <div class="flex min-w-0 flex-col gap-1 md:col-span-6">
-                  <label for="safeItemSearch" class="text-xs font-medium text-slate-300">Search</label>
-                  <input
-                    id="safeItemSearch"
-                    type="search"
-                    class="h-9 w-full rounded-md border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 shadow-sm placeholder:text-slate-500 focus:border-slate-600 focus:outline-none focus:ring-1 focus:ring-slate-600"
-                    placeholder="Filter by title..."
-                  />
-                </div>
-                <div class="flex min-w-0 flex-col gap-1 md:col-span-2">
-                  <span class="text-xs font-medium text-slate-300">Show trashed</span>
-                  <div class="flex h-9 items-center">
-                    <label class="cc-switch">
-                      <input id="safeShowTrashed" type="checkbox" aria-label="Show trashed items" />
-                      <span class="cc-switch-track" aria-hidden="true"></span>
-                    </label>
-                  </div>
-                </div>
+          <div class="cc-dashboard-panel">
+            <div class="flex items-center justify-between mb-2">
+              <h2
+                id="librarySectionTitle"
+                class="cc-section-title cc-section-title--interactive"
+                title="Click to expand or collapse"
+                role="button"
+                tabindex="0"
+              >
+                Library
+              </h2>
+              <div class="flex items-center gap-2">
+                <button id="addResourceBtn" type="button" class="cc-btn cc-btn-primary cc-btn--sm">+ Resource</button>
               </div>
-              <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                <div class="min-h-[300px]">
-                  <div class="text-sm text-slate-300 mb-1">Items</div>
-                  <div id="safeItemsList" class="text-xs text-slate-300 h-[350px] overflow-y-auto space-y-1 rounded bg-slate-950 p-2"></div>
-                </div>
-                <div class="min-h-[300px]">
-                  <div class="flex items-center justify-between mb-1">
-                    <div class="text-sm text-slate-300">Item Details</div>
-                    <div class="flex items-center gap-2">
-                      <button id="safeTotpBtn" class="rounded bg-slate-800 px-2 py-1 text-[10px] hover:bg-slate-700">Get TOTP</button>
-                      <button id="safeDeleteItemBtn" class="rounded bg-red-800 px-2 py-1 text-[10px] hover:bg-red-700">Delete Item</button>
-                    </div>
-                  </div>
-                  <div id="safeItemDetail" class="text-xs text-slate-300 h-[350px] overflow-y-auto rounded bg-slate-950 p-2">
-                    Select an item to load details.
-                  </div>
-                </div>
-              </div>
+            </div>
+            <div id="libraryContent">
+              <div id="resourcesList" class="text-sm text-slate-300">No resources yet.</div>
             </div>
           </div>
         </div>
       </section>
 
       <section id="kanbanView" class="hidden">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-lg font-semibold">Kanban</h2>
-          <div class="flex items-center gap-2">
-            <button id="addColumnBtn" class="rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700">
-              + Column
-            </button>
-            <button id="addTaskBtn" class="rounded bg-emerald-700 px-3 py-1 text-sm hover:bg-emerald-600">
-              + Task
-            </button>
+        <div class="flex flex-col gap-2 mb-3">
+          <div class="flex items-center justify-between gap-2">
+            <h2 class="cc-section-title">Kanban</h2>
+            <div class="flex items-center gap-2">
+              <button id="addColumnBtn" type="button" class="cc-btn cc-btn-secondary cc-btn--header">+ Column</button>
+              <button id="addTaskBtn" type="button" class="cc-btn cc-btn-primary cc-btn--header">+ Task</button>
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 text-sm">
+            <label class="flex min-w-0 flex-1 items-center gap-2 sm:max-w-xs">
+              <span class="shrink-0 text-xs cc-muted">Filter</span>
+              <input
+                id="kanbanFilterText"
+                type="search"
+                spellcheck="true"
+                placeholder="Title, label, or description…"
+                class="cc-input min-w-0 flex-1"
+              />
+            </label>
+            <label class="flex items-center gap-2">
+              <span class="text-xs cc-muted">Priority</span>
+              <select id="kanbanFilterPriority" class="cc-select w-auto">
+                <option value="all" selected>All</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+              </select>
+            </label>
+            <span class="cc-help-text"
+              >Due today: cyan pulse · Overdue: red left edge (local date)</span
+            >
           </div>
         </div>
         <div id="kanbanColumns" class="flex flex-wrap content-start gap-3 items-stretch"></div>
       </section>
     </main>
 
-    <div id="modalRoot" class="hidden fixed inset-0 z-50">
-      <div id="modalBackdrop" class="absolute inset-0 bg-black/60"></div>
-      <div class="absolute inset-0 flex items-center justify-center p-4">
-        <div class="w-full max-w-3xl rounded-lg border border-slate-800 bg-slate-950 shadow-xl">
-          <div class="flex items-center justify-between border-b border-slate-800 px-4 py-3">
-            <div class="text-sm text-slate-300" id="modalTitle">Task</div>
-            <button id="modalClose" class="rounded px-2 py-1 text-slate-300 hover:bg-slate-900">Esc</button>
+    <div id="modalRoot" class="cc-modal-overlay hidden z-50">
+      <div id="modalBackdrop" class="cc-modal-backdrop"></div>
+      <div class="cc-modal-center">
+        <div class="cc-modal-panel cc-modal-panel--lg w-full">
+          <div class="cc-modal-header">
+            <div class="cc-modal-title" id="modalTitle">Task</div>
+            <button id="modalClose" type="button" class="cc-btn cc-btn-ghost cc-btn--sm">Esc</button>
           </div>
-          <div class="p-4 space-y-4">
+          <div class="cc-modal-body space-y-4">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <label class="text-sm">
-                <div class="text-slate-300 mb-1">Title</div>
-                <input id="taskTitle" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
+              <label class="cc-label text-sm">
+                <div class="cc-label-text">Title</div>
+                <input id="taskTitle" type="text" spellcheck="true" class="cc-input" />
               </label>
-              <label class="text-sm">
-                <div class="text-slate-300 mb-1">Priority</div>
-                <select id="taskPriority" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2">
+              <label class="cc-label text-sm">
+                <div class="cc-label-text">Priority</div>
+                <select id="taskPriority" class="cc-select">
                   <option value="low">Low</option>
                   <option value="medium" selected>Medium</option>
                   <option value="high">High</option>
@@ -536,17 +217,13 @@
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <label class="text-sm">
-                <div class="text-slate-300 mb-1">Due date</div>
-                <input
-                  id="taskDueDate"
-                  type="date"
-                  class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2"
-                />
+              <label class="cc-label text-sm">
+                <div class="cc-label-text">Due date</div>
+                <input id="taskDueDate" type="date" class="cc-input" />
               </label>
-              <label class="text-sm">
-                <div class="text-slate-300 mb-1">Repeats</div>
-                <select id="taskRecurrence" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2">
+              <label class="cc-label text-sm">
+                <div class="cc-label-text">Repeats</div>
+                <select id="taskRecurrence" class="cc-select">
                   <option value="none">Does not repeat</option>
                   <option value="daily">Daily</option>
                   <option value="weekly">Weekly</option>
@@ -555,103 +232,143 @@
                 </select>
               </label>
             </div>
-            <p class="text-[11px] text-slate-500 -mt-1">
+            <p class="cc-help-text -mt-1">
               Repeating tasks use the due date as an anchor (weekday, day-of-month, or month/day). Daily can omit the date.
             </p>
 
-            <label class="text-sm block">
+            <label class="cc-label text-sm block">
               <div class="flex items-center justify-between mb-1">
-                <div class="text-slate-300">Description (Markdown)</div>
+                <div class="cc-label-text mb-0">Description (Markdown)</div>
                 <div class="flex gap-2">
-                  <button id="mdEdit" class="rounded bg-slate-800 px-2 py-1 text-xs">Edit</button>
-                  <button id="mdPreview" class="rounded bg-slate-800 px-2 py-1 text-xs">Preview</button>
+                  <button id="mdEdit" type="button" class="cc-btn cc-btn-secondary cc-btn--sm">Edit</button>
+                  <button id="mdPreview" type="button" class="cc-btn cc-btn-secondary cc-btn--sm">Preview</button>
                 </div>
               </div>
-              <textarea id="taskDescription" rows="8" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2 font-mono text-sm"></textarea>
-              <div id="taskDescriptionPreview" class="hidden prose prose-invert max-w-none rounded bg-slate-900 border border-slate-800 px-3 py-2 text-sm"></div>
+              <textarea id="taskDescription" rows="8" spellcheck="true" class="cc-input cc-textarea--mono text-sm"></textarea>
+              <div
+                id="taskDescriptionPreview"
+                class="hidden prose prose-invert max-w-none cc-input text-sm"
+              ></div>
             </label>
 
-            <label class="text-sm block">
-              <div class="text-slate-300 mb-1">Labels (comma-separated)</div>
-              <input id="taskLabels" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" placeholder="backend, urgent, research" />
+            <label class="cc-label text-sm block">
+              <div class="cc-label-text">Labels (comma-separated)</div>
+              <input
+                id="taskLabels"
+                type="text"
+                spellcheck="true"
+                class="cc-input"
+                placeholder="backend, urgent, research"
+              />
             </label>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div class="text-sm block">
-                <div class="text-slate-300 mb-1">Linked Apps</div>
-                <div
-                  id="taskAppIds"
-                  class="w-full max-h-28 overflow-y-auto rounded border border-slate-800 bg-slate-900 px-2 py-1.5 space-y-0.5"
-                ></div>
+              <div class="cc-label text-sm block">
+                <div class="cc-label-text">Linked Apps</div>
+                <div id="taskAppIds" class="cc-list-scroll max-h-28 space-y-0.5"></div>
               </div>
-              <div class="text-sm block">
-                <div class="text-slate-300 mb-1">Linked Resources</div>
-                <div
-                  id="taskResourceIds"
-                  class="w-full max-h-28 overflow-y-auto rounded border border-slate-800 bg-slate-900 px-2 py-1.5 space-y-0.5"
-                ></div>
+              <div class="cc-label text-sm block">
+                <div class="cc-label-text">Linked Resources</div>
+                <div id="taskResourceIds" class="cc-list-scroll max-h-28 space-y-0.5"></div>
               </div>
-              <div class="text-sm block">
-                <div class="text-slate-300 mb-1">Blocking Tasks</div>
-                <div
-                  id="taskBlockingIds"
-                  class="w-full max-h-28 overflow-y-auto rounded border border-slate-800 bg-slate-900 px-2 py-1.5 space-y-0.5"
-                ></div>
+              <div class="cc-label text-sm block">
+                <div class="cc-label-text">Blocking Tasks</div>
+                <div id="taskBlockingIds" class="cc-list-scroll max-h-28 space-y-0.5"></div>
                 <div id="taskBlockingQuickLinks" class="mt-2 flex flex-wrap gap-1"></div>
               </div>
             </div>
 
             <div class="flex items-center justify-end gap-2 pt-2">
-              <button id="taskDelete" class="rounded bg-red-700 px-3 py-2 text-sm hover:bg-red-600">Delete</button>
-              <button id="taskCancel" class="rounded bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700">Cancel</button>
-              <button id="taskSave" class="rounded bg-emerald-700 px-3 py-2 text-sm hover:bg-emerald-600">Save</button>
+              <button id="taskDelete" type="button" class="cc-btn cc-btn-danger">Delete</button>
+              <button id="taskCancel" type="button" class="cc-btn cc-btn-secondary">Cancel</button>
+              <button id="taskSave" type="button" class="cc-btn cc-btn-primary">Save</button>
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <div id="searchModalRoot" class="hidden fixed inset-0 z-50">
-      <div id="searchBackdrop" class="absolute inset-0 bg-black/60"></div>
+    <div id="searchModalRoot" class="cc-modal-overlay hidden z-50">
+      <div id="searchBackdrop" class="cc-modal-backdrop"></div>
       <div class="pointer-events-none absolute inset-0 flex items-start justify-center p-6">
-        <div class="pointer-events-auto w-full max-w-2xl rounded-lg border border-slate-800 bg-slate-950 shadow-xl">
-          <div class="border-b border-slate-800 p-3">
+        <div class="pointer-events-auto w-full cc-modal-panel cc-modal-panel--xl">
+          <div class="border-b border-slate-800 p-3 space-y-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-xs cc-muted shrink-0">Scope:</span>
+              <div class="cc-search-scope">
+                <button type="button" id="searchScopeAll" class="cc-search-scope-btn cc-search-scope-btn--active" aria-pressed="true">
+                  All workspaces
+                </button>
+                <button type="button" id="searchScopeCurrent" class="cc-search-scope-btn" aria-pressed="false">
+                  Current workspace
+                </button>
+              </div>
+            </div>
             <input
               id="searchInput"
-              class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2 text-sm"
+              type="search"
+              spellcheck="true"
+              class="cc-input"
               placeholder="Search workspaces, tasks, apps, resources (including library descriptions)..."
             />
-            <div class="mt-1 text-xs text-slate-400">
+            <div class="mt-1 text-xs cc-muted">
               Shortcut: <span class="font-mono text-slate-300">Ctrl+K</span> (Windows/Linux) or
               <span class="font-mono text-slate-300">⌘+K</span> (macOS). Works in the app when focused; enable
               &quot;global search hotkey&quot; in Settings to use it while CommandCentre is in the background.
             </div>
           </div>
           <div id="searchResults" class="max-h-[60vh] overflow-y-auto p-2 text-sm text-slate-200">
-            <div class="text-slate-400 px-2 py-2">Type to search...</div>
+            <div class="cc-muted px-2 py-2">Type to search...</div>
           </div>
         </div>
       </div>
     </div>
 
-    <div id="crudModalRoot" class="hidden fixed inset-0 z-50">
-      <div id="crudBackdrop" class="absolute inset-0 bg-black/60"></div>
-      <div class="absolute inset-0 flex items-center justify-center p-4">
-        <div class="w-full max-w-xl rounded-lg border border-slate-800 bg-slate-950 shadow-xl">
-          <div class="flex items-center justify-between border-b border-slate-800 px-4 py-3">
-            <div id="crudModalTitle" class="text-sm text-slate-300">Item</div>
-            <button id="crudModalClose" class="rounded px-2 py-1 text-slate-300 hover:bg-slate-900">Esc</button>
+    <div id="crudModalRoot" class="cc-modal-overlay hidden z-50">
+      <div id="crudBackdrop" class="cc-modal-backdrop"></div>
+      <div class="cc-modal-center">
+        <div class="cc-modal-panel cc-modal-panel--md w-full">
+          <div class="cc-modal-header">
+            <div id="crudModalTitle" class="cc-modal-title">Item</div>
+            <button id="crudModalClose" type="button" class="cc-btn cc-btn-ghost cc-btn--sm">Esc</button>
           </div>
-          <div class="p-4 space-y-3">
-            <label class="text-sm block">
-              <div class="text-slate-300 mb-1">Name</div>
-              <input id="crudName" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
+          <div class="cc-modal-body space-y-3">
+            <div id="crudImportRow" class="hidden space-y-2 cc-import-box">
+              <div class="text-xs font-medium text-slate-300">Import from another workspace</div>
+              <p class="cc-help-text">
+                Copy fields from a launcher app or library item elsewhere. You can edit everything before saving.
+              </p>
+              <p id="crudImportNoOtherWs" class="hidden cc-help-text cc-help-text--amber">
+                Add another workspace in Settings to import from it.
+              </p>
+              <div id="crudImportControls" class="space-y-2">
+                <label class="cc-label text-sm block">
+                  <div class="mb-1 text-xs cc-muted">Workspace</div>
+                  <select id="crudImportWorkspace" class="cc-select"></select>
+                </label>
+                <label class="cc-label text-sm block">
+                  <div class="mb-1 text-xs cc-muted">Item</div>
+                  <select id="crudImportItem" class="cc-select" disabled></select>
+                </label>
+                <button
+                  type="button"
+                  id="crudImportApply"
+                  class="cc-btn cc-btn-secondary w-full disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled
+                >
+                  Fill form from selection
+                </button>
+              </div>
+            </div>
+            <label class="cc-label text-sm block">
+              <div class="cc-label-text">Name</div>
+              <input id="crudName" type="text" spellcheck="true" class="cc-input" />
             </label>
-            <label id="crudCommandRow" class="text-sm block">
-              <div class="text-slate-300 mb-1">Command / Path</div>
-              <input id="crudCommand" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
+            <label id="crudCommandRow" class="cc-label text-sm block">
+              <div class="cc-label-text">Command / Path</div>
+              <input id="crudCommand" type="text" spellcheck="false" class="cc-input" />
             </label>
-            <div id="crudIconRow" class="hidden rounded border border-slate-800 bg-slate-950/40 p-3">
+            <div id="crudIconRow" class="hidden cc-icon-row">
               <div class="text-sm text-slate-300 mb-2">Launcher icon</div>
               <div class="flex flex-wrap items-center gap-3">
                 <label class="flex items-center gap-2 text-sm text-slate-200">
@@ -664,58 +381,65 @@
                 </label>
               </div>
               <div id="crudIconUnicodeRow" class="mt-3">
-                <div class="text-xs text-slate-400 mb-1">Character (e.g. 🖿 ⚙ ✦)</div>
-                <input id="crudIconUnicode" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
+                <div class="text-xs cc-muted mb-1">Character (e.g. 🖿 ⚙ ✦)</div>
+                <input id="crudIconUnicode" type="text" spellcheck="false" class="cc-input" />
               </div>
               <div id="crudIconFileRow" class="mt-3 hidden">
-                <div class="text-xs text-slate-400 mb-1">Path to icon image</div>
+                <div class="text-xs cc-muted mb-1">Path to icon image</div>
                 <div class="flex items-center gap-2">
-                  <input id="crudIconFile" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
-                  <button id="crudPickIconFile" type="button" class="shrink-0 rounded bg-slate-800 px-2 py-2 text-xs hover:bg-slate-700" title="Pick icon file">Browse</button>
+                  <input id="crudIconFile" type="text" spellcheck="false" class="cc-input" />
+                  <button
+                    id="crudPickIconFile"
+                    type="button"
+                    class="cc-btn cc-btn-secondary cc-btn--sm shrink-0"
+                    title="Pick icon file"
+                  >
+                    Browse
+                  </button>
                 </div>
-                <div class="mt-2 text-xs text-slate-500">Supported: png, jpg, svg, ico, webp (max 512KB)</div>
+                <div class="mt-2 cc-help-text">Supported: png, jpg, svg, ico, webp (max 512KB)</div>
               </div>
             </div>
-            <label id="crudTypeRow" class="text-sm block hidden">
-              <div class="text-slate-300 mb-1">Type</div>
-              <select id="crudType" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2">
+            <label id="crudTypeRow" class="cc-label text-sm block hidden">
+              <div class="cc-label-text">Type</div>
+              <select id="crudType" class="cc-select">
                 <option value="file">file</option>
                 <option value="web">web</option>
               </select>
             </label>
-            <label id="crudPathRow" class="text-sm block hidden">
-              <div class="text-slate-300 mb-1">Path / URL</div>
-              <input id="crudPath" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
+            <label id="crudPathRow" class="cc-label text-sm block hidden">
+              <div class="cc-label-text">Path / URL</div>
+              <input id="crudPath" type="text" spellcheck="false" class="cc-input" />
             </label>
-            <label class="text-sm block">
-              <div class="text-slate-300 mb-1">Category</div>
-              <input id="crudCategory" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
+            <label class="cc-label text-sm block">
+              <div class="cc-label-text">Category</div>
+              <input id="crudCategory" type="text" spellcheck="true" class="cc-input" />
             </label>
-            <label id="crudDescriptionRow" class="text-sm block hidden">
-              <div class="text-slate-300 mb-1">Description</div>
-              <textarea id="crudDescription" rows="3" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2"></textarea>
+            <label id="crudDescriptionRow" class="cc-label text-sm block hidden">
+              <div class="cc-label-text">Description</div>
+              <textarea id="crudDescription" rows="3" spellcheck="true" class="cc-input"></textarea>
             </label>
             <div class="flex items-center justify-end gap-2 pt-2">
-              <button id="crudCancel" class="rounded bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700">Cancel</button>
-              <button id="crudSave" class="rounded bg-emerald-700 px-3 py-2 text-sm hover:bg-emerald-600">Save</button>
+              <button id="crudCancel" type="button" class="cc-btn cc-btn-secondary">Cancel</button>
+              <button id="crudSave" type="button" class="cc-btn cc-btn-primary">Save</button>
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <div id="columnEditModalRoot" class="hidden fixed inset-0 z-[65]">
-      <div id="columnEditBackdrop" class="absolute inset-0 bg-black/60"></div>
-      <div class="absolute inset-0 flex items-center justify-center p-4">
-        <div class="w-full max-w-md rounded-lg border border-slate-800 bg-slate-950 shadow-xl">
-          <div class="flex items-center justify-between border-b border-slate-800 px-4 py-3">
-            <div class="text-sm text-slate-300">Edit column</div>
-            <button id="columnEditClose" type="button" class="rounded px-2 py-1 text-slate-300 hover:bg-slate-900">Esc</button>
+    <div id="columnEditModalRoot" class="cc-modal-overlay hidden z-[65]">
+      <div id="columnEditBackdrop" class="cc-modal-backdrop"></div>
+      <div class="cc-modal-center">
+        <div class="cc-modal-panel cc-modal-panel--sm w-full max-w-md">
+          <div class="cc-modal-header">
+            <div class="cc-modal-title">Edit column</div>
+            <button id="columnEditClose" type="button" class="cc-btn cc-btn-ghost cc-btn--sm">Esc</button>
           </div>
-          <div class="p-4 space-y-4">
-            <label class="text-sm block">
-              <span class="text-slate-300 mb-1 block">Name</span>
-              <input id="columnEditName" type="text" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
+          <div class="cc-modal-body space-y-4">
+            <label class="cc-label text-sm block">
+              <span class="cc-label-text block">Name</span>
+              <input id="columnEditName" type="text" spellcheck="true" class="cc-input" />
             </label>
             <label class="flex cursor-pointer items-center justify-between gap-3 rounded border border-slate-800 p-3">
               <span class="text-sm text-slate-200">Done column</span>
@@ -724,100 +448,70 @@
                 <span class="cc-switch-track" aria-hidden="true"></span>
               </span>
             </label>
-            <p class="text-xs text-slate-500 leading-relaxed">
+            <p class="cc-help-text leading-relaxed">
               Tasks in this column count as completed for blocking dependencies. Only one column per workspace can be the
               done column.
             </p>
             <div class="flex items-center justify-end gap-2 pt-1">
-              <button id="columnEditCancel" type="button" class="rounded bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700">
-                Cancel
-              </button>
-              <button id="columnEditSave" type="button" class="rounded bg-emerald-700 px-3 py-2 text-sm hover:bg-emerald-600">
-                Save
-              </button>
+              <button id="columnEditCancel" type="button" class="cc-btn cc-btn-secondary">Cancel</button>
+              <button id="columnEditSave" type="button" class="cc-btn cc-btn-primary">Save</button>
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <div id="textModalRoot" class="hidden fixed inset-0 z-[70]">
-      <div id="textBackdrop" class="absolute inset-0 bg-black/60"></div>
-      <div class="absolute inset-0 flex items-center justify-center p-4">
-        <div class="w-full max-w-md rounded-lg border border-slate-800 bg-slate-950 shadow-xl">
-          <div class="flex items-center justify-between border-b border-slate-800 px-4 py-3">
-            <div id="textModalTitle" class="text-sm text-slate-300">Input</div>
-            <button id="textModalClose" class="rounded px-2 py-1 text-slate-300 hover:bg-slate-900">Esc</button>
+    <div id="textModalRoot" class="cc-modal-overlay hidden z-[70]">
+      <div id="textBackdrop" class="cc-modal-backdrop"></div>
+      <div class="cc-modal-center">
+        <div class="cc-modal-panel cc-modal-panel--sm w-full max-w-md">
+          <div class="cc-modal-header">
+            <div id="textModalTitle" class="cc-modal-title">Input</div>
+            <button id="textModalClose" type="button" class="cc-btn cc-btn-ghost cc-btn--sm">Esc</button>
           </div>
-          <div class="p-4 space-y-3">
-            <label class="text-sm block">
-              <div id="textModalLabel" class="text-slate-300 mb-1">Value</div>
-              <input id="textModalInput" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
+          <div class="cc-modal-body space-y-3">
+            <label class="cc-label text-sm block">
+              <div id="textModalLabel" class="cc-label-text">Value</div>
+              <input id="textModalInput" type="text" spellcheck="true" class="cc-input" />
             </label>
             <div class="flex items-center justify-end gap-2 pt-1">
-              <button id="textCancel" class="rounded bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700">Cancel</button>
-              <button id="textSave" class="rounded bg-emerald-700 px-3 py-2 text-sm hover:bg-emerald-600">Save</button>
+              <button id="textCancel" type="button" class="cc-btn cc-btn-secondary">Cancel</button>
+              <button id="textSave" type="button" class="cc-btn cc-btn-primary">Save</button>
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <div id="confirmModalRoot" class="hidden fixed inset-0 z-[90]">
-      <div id="confirmBackdrop" class="absolute inset-0 bg-black/60"></div>
-      <div class="absolute inset-0 flex items-center justify-center p-4">
-        <div class="w-full max-w-md rounded-lg border border-slate-800 bg-slate-950 shadow-xl">
-          <div class="flex items-center justify-between border-b border-slate-800 px-4 py-3">
-            <div id="confirmModalTitle" class="text-sm text-slate-300">Confirm</div>
-            <button id="confirmModalClose" class="rounded px-2 py-1 text-slate-300 hover:bg-slate-900">Esc</button>
+    <div id="confirmModalRoot" class="cc-modal-overlay hidden z-[90]">
+      <div id="confirmBackdrop" class="cc-modal-backdrop"></div>
+      <div class="cc-modal-center">
+        <div class="cc-modal-panel cc-modal-panel--sm w-full max-w-md">
+          <div class="cc-modal-header">
+            <div id="confirmModalTitle" class="cc-modal-title">Confirm</div>
+            <button id="confirmModalClose" type="button" class="cc-btn cc-btn-ghost cc-btn--sm">Esc</button>
           </div>
-          <div class="p-4 space-y-3">
+          <div class="cc-modal-body space-y-3">
             <p id="confirmModalMessage" class="text-sm text-slate-200"></p>
             <div class="flex items-center justify-end gap-2 pt-1">
-              <button id="confirmCancel" class="rounded bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700">Cancel</button>
-              <button id="confirmOk" class="rounded bg-red-700 px-3 py-2 text-sm hover:bg-red-600">Confirm</button>
+              <button id="confirmCancel" type="button" class="cc-btn cc-btn-secondary">Cancel</button>
+              <button id="confirmOk" type="button" class="cc-btn cc-btn-danger">Confirm</button>
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <div id="safeNoteModalRoot" class="hidden fixed inset-0 z-50">
-      <div id="safeNoteBackdrop" class="absolute inset-0 bg-black/60"></div>
-      <div class="absolute inset-0 flex items-center justify-center p-4">
-        <div class="w-full max-w-xl rounded-lg border border-slate-800 bg-slate-950 shadow-xl">
-          <div class="flex items-center justify-between border-b border-slate-800 px-4 py-3">
-            <div id="safeNoteModalTitle" class="text-sm text-slate-300">Create Secure Note</div>
-            <button id="safeNoteClose" class="rounded px-2 py-1 text-slate-300 hover:bg-slate-900">Esc</button>
+    <div id="settingsModalRoot" class="cc-modal-overlay hidden z-50">
+      <div id="settingsBackdrop" class="cc-modal-backdrop"></div>
+      <div class="cc-modal-center">
+        <div class="cc-modal-panel cc-modal-panel--xl w-full max-w-2xl">
+          <div class="cc-modal-header">
+            <div class="cc-modal-title">Settings</div>
+            <button id="settingsClose" type="button" class="cc-btn cc-btn-ghost cc-btn--sm">Esc</button>
           </div>
-          <div class="p-4 space-y-3">
-            <label class="text-sm block">
-              <div class="text-slate-300 mb-1">Title</div>
-              <input id="safeNoteTitle" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2" />
-            </label>
-            <label class="text-sm block">
-              <div class="text-slate-300 mb-1">Note content</div>
-              <textarea id="safeNoteContent" rows="8" class="w-full rounded bg-slate-900 border border-slate-800 px-3 py-2 font-mono text-sm"></textarea>
-            </label>
-            <div class="flex items-center justify-end gap-2">
-              <button id="safeNoteCancel" class="rounded bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700">Cancel</button>
-              <button id="safeNoteSave" class="rounded bg-emerald-700 px-3 py-2 text-sm hover:bg-emerald-600">Create</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div id="settingsModalRoot" class="hidden fixed inset-0 z-50">
-      <div id="settingsBackdrop" class="absolute inset-0 bg-black/60"></div>
-      <div class="absolute inset-0 flex items-center justify-center p-4">
-        <div class="w-full max-w-2xl rounded-lg border border-slate-800 bg-slate-950 shadow-xl">
-          <div class="flex items-center justify-between border-b border-slate-800 px-4 py-3">
-            <div class="text-sm text-slate-300">Settings</div>
-            <button id="settingsClose" class="rounded px-2 py-1 text-slate-300 hover:bg-slate-900">Esc</button>
-          </div>
-          <div class="p-4 space-y-5">
-            <div class="rounded border border-slate-800 p-3">
+          <div class="cc-modal-body space-y-5">
+            <div class="cc-settings-section">
               <label class="flex min-h-[2.75rem] cursor-pointer items-center justify-between gap-4">
                 <span class="text-sm text-slate-200">Launch CommandCentre on startup</span>
                 <span class="cc-switch">
@@ -826,8 +520,8 @@
                 </span>
               </label>
             </div>
-            <div class="rounded border border-slate-800 p-3 space-y-3">
-              <div class="text-sm text-slate-300">Integrations</div>
+            <div class="cc-settings-section cc-settings-section--stack">
+              <div class="cc-modal-title">Integrations</div>
               <label class="flex min-h-[2.75rem] cursor-pointer items-center justify-between gap-4">
                 <span class="text-sm text-slate-200">Enable system tray icon</span>
                 <span class="cc-switch">
@@ -835,7 +529,7 @@
                   <span class="cc-switch-track" aria-hidden="true"></span>
                 </span>
               </label>
-              <p class="text-xs text-slate-500 leading-relaxed">
+              <p class="cc-help-text leading-relaxed">
                 With the tray on, the close button hides the window instead of quitting. Use the tray icon: right-click
                 for a menu (Show, Search, Quit). On some desktops, double-clicking the icon opens the default action
                 (Show).
@@ -851,78 +545,101 @@
                 </span>
               </label>
             </div>
-            <div class="rounded border border-slate-800 p-3 space-y-3">
-              <div class="text-sm text-slate-300">Safe section lock PIN</div>
-              <p class="text-xs text-slate-500 leading-relaxed">
-                This PIN only hides the Safe panel from casual viewing while your session is unlocked. It is stored in the
-                app database as plain text and is not a substitute for locking your computer or signing out of your user
-                account.
+            <div class="cc-settings-section">
+              <div class="cc-modal-title mb-1">Workspaces</div>
+              <p class="mb-2 cc-help-text">Drag rows to reorder — same order as the workspace tabs in the header.</p>
+              <div id="workspaceSettingsList" class="space-y-2 text-sm"></div>
+            </div>
+            <div class="cc-settings-section cc-settings-section--stack">
+              <div class="cc-modal-title">Appearance / custom CSS</div>
+              <p class="cc-help-text leading-relaxed">
+                Optional CSS applied after the bundled default theme. Invalid rules may break layout. Stored locally in
+                the database; export/import JSON includes this setting.
               </p>
-              <p id="safeLockPinStatus" class="text-xs text-slate-400"></p>
-              <label class="block text-xs">
-                <span class="text-slate-300 mb-1 block">New PIN</span>
-                <input
-                  id="safeLockPinNew"
-                  type="password"
-                  autocomplete="new-password"
-                  class="w-full max-w-sm rounded bg-slate-900 border border-slate-800 px-2 py-1 text-sm"
-                />
-              </label>
-              <label class="block text-xs">
-                <span class="text-slate-300 mb-1 block">Confirm PIN</span>
-                <input
-                  id="safeLockPinConfirm"
-                  type="password"
-                  autocomplete="new-password"
-                  class="w-full max-w-sm rounded bg-slate-900 border border-slate-800 px-2 py-1 text-sm"
-                />
-              </label>
+              <textarea
+                id="settingsCustomCss"
+                class="cc-custom-css-input cc-input"
+                spellcheck="false"
+                placeholder="/* e.g. :root { --cc-accent-sky: #fff; } */"
+              ></textarea>
               <div class="flex flex-wrap gap-2">
-                <button type="button" id="safeLockPinSaveBtn" class="rounded bg-emerald-700 px-3 py-1.5 text-xs hover:bg-emerald-600">
-                  Save PIN
+                <button type="button" id="settingsLoadDefaultCssBtn" class="cc-btn cc-btn-secondary cc-btn--sm">
+                  Load default as template
+                </button>
+                <button type="button" id="settingsSaveCustomCssBtn" class="cc-btn cc-btn-primary cc-btn--sm">
+                  Save custom CSS
+                </button>
+                <button type="button" id="settingsClearCustomCssBtn" class="cc-btn cc-btn-muted cc-btn--sm">
+                  Use default (clear custom)
                 </button>
               </div>
             </div>
-            <div class="rounded border border-slate-800 p-3">
-              <div class="flex items-center justify-between mb-2">
-                <div class="text-sm text-slate-300">Proton Pass CLI</div>
-                <div class="flex items-center gap-2">
-                  <button id="safeLoginBtn" class="rounded bg-emerald-700 px-2 py-1 text-xs hover:bg-emerald-600">Login</button>
-                  <button id="safeLogoutBtn" class="rounded bg-slate-800 px-2 py-1 text-xs hover:bg-slate-700">Logout</button>
-                  <button id="safeStatusRefreshBtn" class="rounded bg-slate-800 px-2 py-1 text-xs hover:bg-slate-700">Refresh</button>
-                  <button id="safeDebugBtn" class="rounded bg-slate-800 px-2 py-1 text-xs hover:bg-slate-700">Debug</button>
-                </div>
+            <div class="cc-settings-section cc-settings-section--stack">
+              <div class="cc-modal-title">Backup &amp; restore (JSON)</div>
+              <p class="cc-help-text leading-relaxed">
+                Export includes all workspaces, launcher, library, Kanban, universal tray, and settings keys. Import in
+                <span class="cc-help-text--amber">replace</span> mode wipes existing data before loading the file. Consider
+                copying your SQLite database file first if you need a raw backup.
+              </p>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" id="settingsExportJsonBtn" class="cc-btn cc-btn-secondary">Export JSON…</button>
+                <button type="button" id="settingsImportJsonBtn" class="cc-btn cc-btn-secondary">Import JSON…</button>
               </div>
-              <div id="safeSettingsStatus" class="text-xs text-slate-400">Checking status...</div>
-            </div>
-            <div class="rounded border border-slate-800 p-3">
-              <div class="text-sm text-slate-300 mb-1">Workspaces</div>
-              <p class="mb-2 text-[11px] text-slate-500">Drag rows to reorder — same order as the workspace tabs in the header.</p>
-              <div id="workspaceSettingsList" class="space-y-2 text-sm"></div>
+              <input type="file" id="settingsImportFile" accept="application/json,.json" class="hidden" />
             </div>
           </div>
         </div>
       </div>
     </div>
 
+    <div id="taskReviewModalRoot" class="cc-modal-overlay hidden z-[55]">
+      <div id="taskReviewBackdrop" class="cc-modal-backdrop"></div>
+      <div class="cc-modal-center">
+        <div class="cc-modal-panel w-full max-w-lg">
+          <div class="cc-modal-header">
+            <div class="cc-modal-title">Task review</div>
+            <button id="taskReviewClose" type="button" class="cc-btn cc-btn-ghost cc-btn--sm">Esc</button>
+          </div>
+          <div class="cc-modal-body space-y-4">
+            <p class="cc-help-text">
+              Due today and critical tasks (excluding the done column). <span class="font-mono text-slate-400">J</span> /
+              <span class="font-mono text-slate-400">K</span> or PgUp / PgDn to move.
+            </p>
+            <div id="taskReviewBody" class="cc-task-review-body"></div>
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex flex-wrap gap-2">
+                <button type="button" id="taskReviewPrev" class="cc-btn cc-btn-secondary">Previous</button>
+                <button type="button" id="taskReviewNext" class="cc-btn cc-btn-secondary">Next</button>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" id="taskReviewOpenEditor" class="cc-btn cc-btn-sky">Open full editor</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="columnContextMenu" class="cc-context-menu cc-context-menu--wide hidden fixed z-[85]">
+      <button type="button" id="columnContextNewTask" class="cc-context-item">
+        New task in this column…
+      </button>
+    </div>
+
     <div id="toastRoot" class="fixed bottom-4 right-4 z-[60] flex max-w-sm flex-col gap-2"></div>
-    <div
-      id="launcherContextMenu"
-      class="hidden fixed z-[80] min-w-[140px] rounded border border-slate-700 bg-slate-900 p-1 shadow-xl"
-    >
-      <button
-        id="launcherContextEdit"
-        class="block w-full rounded px-2 py-1.5 text-left text-xs text-slate-200 hover:bg-slate-800"
-      >
-        Edit
-      </button>
-      <button
-        id="launcherContextDelete"
-        class="block w-full rounded px-2 py-1.5 text-left text-xs text-red-300 hover:bg-red-950/70"
-      >
-        Delete
-      </button>
+    <div id="launcherContextMenu" class="cc-context-menu hidden fixed z-[80]">
+      <div id="launcherContextAppActions" class="space-y-0">
+        <button id="launcherContextEdit" type="button" class="cc-context-item">Edit</button>
+        <button id="launcherContextDelete" type="button" class="cc-context-item cc-context-item--danger">
+          Delete
+        </button>
+      </div>
+      <div id="launcherContextDividerActions" class="hidden space-y-0">
+        <button id="launcherContextRemoveDivider" type="button" class="cc-context-item cc-context-item--danger">
+          Remove divider
+        </button>
+        <button id="launcherContextAddDividerAfter" type="button" class="cc-context-item">Add divider after</button>
+      </div>
     </div>
   </body>
 </html>
-

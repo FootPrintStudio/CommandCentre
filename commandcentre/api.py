@@ -1,7 +1,17 @@
+import json
 import re
+from datetime import date, datetime, timezone
+from pathlib import Path
 
+from .config import TEMPLATES_DIR
 from .db import get_connection
 from . import system
+
+_EXPORT_JSON_VERSION = 1
+
+_UI_CUSTOM_CSS_KEY = "ui_custom_css"
+_UI_CUSTOM_CSS_MAX = 256 * 1024
+_DEFAULT_UI_CSS_PATH = Path(TEMPLATES_DIR) / "assets" / "css" / "commandcentre-default.css"
 
 
 def _next_app_sort_order(conn, workspace_id, category):
@@ -201,11 +211,30 @@ class CommandCentreAPI:
             cursor = conn.execute(
                 """
                 INSERT INTO global_tray_apps(
-                    name, command_path, category, icon_type, icon_value, sort_order
+                    name, command_path, category, icon_type, icon_value, sort_order, entry_type
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, 'app')
                 """,
                 (name, command_path, category, icon_type, icon_value, sort_order),
+            )
+            conn.commit()
+            return {"id": cursor.lastrowid}
+
+    def create_global_tray_divider(self, name=""):
+        label = (name or "").strip() or "—"
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM global_tray_apps"
+            ).fetchone()
+            sort_order = int(row["n"] if row and row["n"] is not None else 0)
+            cursor = conn.execute(
+                """
+                INSERT INTO global_tray_apps(
+                    name, command_path, category, icon_type, icon_value, sort_order, entry_type
+                )
+                VALUES (?, '', 'Uncategorized', 'unicode', '', ?, 'divider')
+                """,
+                (label, sort_order),
             )
             conn.commit()
             return {"id": cursor.lastrowid}
@@ -238,11 +267,12 @@ class CommandCentreAPI:
         return {"ok": True}
 
     def reorder_global_tray_apps(self, ordered_ids):
+        """Reorder universal tray entries (apps and dividers)."""
         ids = list(ordered_ids or [])
         with get_connection() as conn:
             existing = {row["id"] for row in conn.execute("SELECT id FROM global_tray_apps").fetchall()}
             if set(ids) != existing or len(ids) != len(existing):
-                return {"ok": False, "error": "ordered_ids must list each universal tray app exactly once"}
+                return {"ok": False, "error": "ordered_ids must list each universal tray entry exactly once"}
             for i, app_id in enumerate(ids):
                 conn.execute(
                     "UPDATE global_tray_apps SET sort_order = ? WHERE id = ?",
@@ -536,78 +566,17 @@ class CommandCentreAPI:
     def is_autostart_enabled(self):
         return system.is_autostart_enabled()
 
-    def open_safe_panel(self, workspace_id):
-        return system.open_safe_panel(workspace_id)
-
-    def safe_cli_status(self):
-        return system.safe_cli_status()
-
-    def safe_cli_list_vaults(self):
-        return system.safe_cli_list_vaults()
-
-    def safe_cli_list_items(self, vault_id):
-        return system.safe_cli_list_items(vault_id)
-
-    def safe_cli_login(self):
-        return system.safe_cli_login()
-
-    def safe_cli_logout(self):
-        return system.safe_cli_logout()
-
-    def safe_cli_debug(self, vault_id):
-        return system.safe_cli_debug(vault_id)
-
-    def safe_cli_get_item(self, vault_id, item_id):
-        return system.safe_cli_get_item(vault_id, item_id)
-
-    def safe_cli_get_totp(self, vault_id, item_id):
-        return system.safe_cli_get_totp(vault_id, item_id)
-
-    def safe_cli_delete_item(self, vault_id, item_id):
-        return system.safe_cli_delete_item(vault_id, item_id)
-
-    def safe_cli_create_note(self, vault_id, title, note):
-        return system.safe_cli_create_note(vault_id, title, note)
-
     def pick_icon_file(self):
         return system.pick_icon_file()
 
     def read_icon_file(self, path):
         return system.read_icon_file(path)
 
-    def get_workspace_safe_pref(self, workspace_id):
-        with get_connection() as conn:
-            row = conn.execute(
-                "SELECT vault_id FROM workspace_safe_prefs WHERE workspace_id = ?",
-                (workspace_id,),
-            ).fetchone()
-        return {"workspace_id": workspace_id, "vault_id": row["vault_id"] if row else None}
-
-    def set_workspace_safe_pref(self, workspace_id, vault_id):
-        with get_connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO workspace_safe_prefs(workspace_id, vault_id, updated_at)
-                VALUES (?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(workspace_id)
-                DO UPDATE SET vault_id = excluded.vault_id, updated_at = CURRENT_TIMESTAMP
-                """,
-                (workspace_id, vault_id),
-            )
-            conn.commit()
-        return {"ok": True}
-
     def register_hotkey(self, key_combo, callback):
         return system.register_hotkey(key_combo, callback)
 
     def get_integration_settings(self):
         return system.get_integration_settings()
-
-    def verify_safe_lock_pin(self, pin):
-        return system.verify_safe_lock_pin(pin)
-
-    def set_safe_lock_pin(self, pin):
-        return system.set_safe_lock_pin(pin)
 
     def set_tray_enabled(self, enabled):
         normalized = bool(enabled)
@@ -636,4 +605,169 @@ class CommandCentreAPI:
             )
             conn.commit()
         return system.set_hotkey_enabled(normalized, "Ctrl+K")
+
+    def get_default_ui_css(self):
+        try:
+            css = _DEFAULT_UI_CSS_PATH.read_text(encoding="utf-8")
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "css": css}
+
+    def get_ui_custom_css(self):
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_settings WHERE key = ?",
+                (_UI_CUSTOM_CSS_KEY,),
+            ).fetchone()
+        val = row["value"] if row and row["value"] is not None else ""
+        return {"ok": True, "css": val}
+
+    def set_ui_custom_css(self, css):
+        s = "" if css is None else str(css)
+        if len(s) > _UI_CUSTOM_CSS_MAX:
+            return {"ok": False, "error": f"CSS exceeds maximum length ({_UI_CUSTOM_CSS_MAX} bytes)"}
+        with get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO app_settings(key, value, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+                """,
+                (_UI_CUSTOM_CSS_KEY, s),
+            )
+            conn.commit()
+        return {"ok": True}
+
+    def clear_ui_custom_css(self):
+        with get_connection() as conn:
+            conn.execute("DELETE FROM app_settings WHERE key = ?", (_UI_CUSTOM_CSS_KEY,))
+            conn.commit()
+        return {"ok": True}
+
+    _EXPORT_TABLES_ORDER = (
+        "workspaces",
+        "kanban_columns",
+        "apps",
+        "resources",
+        "tasks",
+        "global_tray_apps",
+        "app_settings",
+    )
+
+    def export_data_json(self):
+        with get_connection() as conn:
+            payload = {
+                "version": _EXPORT_JSON_VERSION,
+                "exported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+            for table in self._EXPORT_TABLES_ORDER:
+                rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+                payload[table] = [dict(r) for r in rows]
+        return json.dumps(payload, indent=2)
+
+    def import_data_json(self, json_string, mode="replace"):
+        if (mode or "").strip().lower() != "replace":
+            return {"ok": False, "error": "Only replace mode is supported"}
+        try:
+            data = json.loads(json_string)
+        except json.JSONDecodeError as exc:
+            return {"ok": False, "error": f"Invalid JSON: {exc}"}
+        try:
+            ver = int(data.get("version", -1))
+        except (TypeError, ValueError):
+            ver = -1
+        if ver != _EXPORT_JSON_VERSION:
+            return {"ok": False, "error": "Unsupported or missing export version"}
+        delete_order = (
+            "tasks",
+            "apps",
+            "resources",
+            "kanban_columns",
+            "workspaces",
+            "global_tray_apps",
+            "app_settings",
+        )
+        with get_connection() as conn:
+            cols_by_table = {
+                t: [r["name"] for r in conn.execute(f"PRAGMA table_info({t})").fetchall()]
+                for t in self._EXPORT_TABLES_ORDER
+            }
+            try:
+                conn.execute("BEGIN EXCLUSIVE")
+                for table in delete_order:
+                    conn.execute(f"DELETE FROM {table}")
+                for table in self._EXPORT_TABLES_ORDER:
+                    rows = data.get(table)
+                    if rows is None:
+                        raise ValueError(f"missing table key: {table}")
+                    if not isinstance(rows, list):
+                        raise ValueError(f"invalid rows for {table}")
+                    db_cols = cols_by_table[table]
+                    for row in rows:
+                        if not isinstance(row, dict):
+                            raise ValueError(f"invalid row in {table}")
+                        values = []
+                        for c in db_cols:
+                            if c in row:
+                                values.append(row[c])
+                            elif table == "global_tray_apps" and c == "entry_type":
+                                values.append("app")
+                            else:
+                                values.append(None)
+                        ph = ",".join("?" * len(db_cols))
+                        conn.execute(
+                            f"INSERT INTO {table} ({','.join(db_cols)}) VALUES ({ph})",
+                            values,
+                        )
+                conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                return {"ok": False, "error": str(exc)}
+        return {"ok": True}
+
+    def get_task_review_queue(self):
+        today = date.today().isoformat()
+        due_items = []
+        crit_items = []
+        with get_connection() as conn:
+            workspaces = conn.execute(
+                "SELECT id, name FROM workspaces ORDER BY sort_order, id"
+            ).fetchall()
+            for ws in workspaces:
+                wid = ws["id"]
+                done_row = conn.execute(
+                    """
+                    SELECT id FROM kanban_columns
+                    WHERE workspace_id = ? AND is_done = 1
+                    ORDER BY sort_order, id LIMIT 1
+                    """,
+                    (wid,),
+                ).fetchone()
+                done_id = done_row["id"] if done_row else None
+                tasks = conn.execute(
+                    "SELECT * FROM tasks WHERE workspace_id = ? ORDER BY id",
+                    (wid,),
+                ).fetchall()
+                for t in tasks:
+                    if done_id is not None and t["column_id"] == done_id:
+                        continue
+                    due_raw = (t.get("due_date") or "").strip()[:10]
+                    pri = (t.get("priority") or "").strip().lower()
+                    due_today = due_raw == today
+                    critical = pri == "critical"
+                    if not due_today and not critical:
+                        continue
+                    entry = {
+                        "workspace_id": wid,
+                        "workspace_name": ws["name"],
+                        "task_id": t["id"],
+                        "title": t["title"],
+                        "due_date": t.get("due_date"),
+                        "priority": t.get("priority"),
+                    }
+                    if due_today:
+                        due_items.append(entry)
+                    else:
+                        crit_items.append(entry)
+        return {"ok": True, "items": due_items + crit_items}
 
