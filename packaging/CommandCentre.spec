@@ -12,7 +12,36 @@ added_datas: list = []
 added_binaries: list = []
 added_hiddenimports: list = []
 
-for pkg in ("PyQt6", "pywebview", "PIL", "pystray", "pynput"):
+# PyQt6 base + Qt WebEngine (separate pip package PyQt6-WebEngine). collect_all("PyQt6")
+# often omits libexec/QtWebEngineProcess — bundle it explicitly or the AppImage aborts at startup.
+_pyqt6_packages = (
+    "PyQt6",
+    "PyQt6.QtWebEngineCore",
+    "PyQt6.QtWebEngineWidgets",
+    "PyQt6.QtPrintSupport",
+)
+for pkg in _pyqt6_packages:
+    try:
+        d, b, h = collect_all(pkg)
+        added_datas += d
+        added_binaries += b
+        added_hiddenimports += h
+    except Exception:
+        pass
+
+# Last-resort: ensure QtWebEngineProcess is listed (some PyInstaller/Qt combos omit it).
+try:
+    import PyQt6
+
+    _le = Path(PyQt6.__file__).resolve().parent / "Qt6" / "libexec" / "QtWebEngineProcess"
+    if _le.is_file():
+        _dest = str(Path("PyQt6") / "Qt6" / "libexec" / "QtWebEngineProcess")
+        if not any(dest == _dest for _, dest in added_binaries):
+            added_binaries.append((str(_le), _dest))
+except Exception:
+    pass
+
+for pkg in ("pywebview", "PIL", "pystray", "pynput"):
     try:
         d, b, h = collect_all(pkg)
         added_datas += d
@@ -36,6 +65,8 @@ a = Analysis(
             added_hiddenimports
             + [
                 "webview.platforms.qt",
+                "PyQt6.QtWebEngineCore",
+                "PyQt6.QtWebEngineWidgets",
                 "bottle",
                 "PIL.Image",
                 "PIL.ImageDraw",

@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from commandcentre.api import CommandCentreAPI
 from commandcentre.db import initialize_database
 
@@ -200,4 +202,32 @@ def test_get_task_review_queue_excludes_done_and_includes_due_and_critical():
     assert "Due today" in titles
     assert "Critical open" in titles
     assert tid_done not in {item["task_id"] for item in q["items"]}
+
+
+def test_open_markdown_href_rejects_dangerous_and_relative():
+    initialize_database()
+    api = CommandCentreAPI()
+    assert api.open_markdown_href("javascript:alert(1)").get("ok") is False
+    assert api.open_markdown_href("data:text/html,<svg>").get("ok") is False
+    assert api.open_markdown_href("").get("ok") is False
+    assert api.open_markdown_href("relative-only").get("ok") is False
+    assert api.open_markdown_href("/no-scheme").get("ok") is False
+
+
+def test_open_markdown_href_https_uses_webbrowser():
+    initialize_database()
+    api = CommandCentreAPI()
+    with patch("commandcentre.system.webbrowser.open") as wo:
+        r = api.open_markdown_href("https://example.com/path?x=1")
+        assert r.get("ok") is True
+        wo.assert_called_once_with("https://example.com/path?x=1")
+
+
+def test_open_markdown_href_file_uses_xdg_open():
+    initialize_database()
+    api = CommandCentreAPI()
+    with patch("commandcentre.system.subprocess.Popen") as popen:
+        r = api.open_markdown_href("file:///tmp/x.txt")
+        assert r.get("ok") is True
+        popen.assert_called_once_with(["xdg-open", "file:///tmp/x.txt"])
 

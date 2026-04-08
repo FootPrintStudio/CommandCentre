@@ -560,6 +560,9 @@ class CommandCentreAPI:
     def open_resource(self, path_or_url, resource_type):
         return system.open_resource(path_or_url, resource_type)
 
+    def open_markdown_href(self, href):
+        return system.open_markdown_href(href)
+
     def set_autostart(self, enabled):
         return system.set_autostart(enabled)
 

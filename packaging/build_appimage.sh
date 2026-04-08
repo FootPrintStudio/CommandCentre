@@ -2,12 +2,12 @@
 # Build CommandCentre-x86_64.AppImage (Linux x86_64).
 #
 # Prerequisites: Python 3.11+, and the standalone appimagetool from:
-#   https://github.com/AppImage/appimagetool
-# Download a release AppImage (e.g. appimagetool-x86_64.AppImage), chmod +x, then either:
-#   - Put it on PATH as `appimagetool`, or
-#   - Point APPIMAGETOOL at the file, e.g.:
-#       APPIMAGETOOL="$HOME/.local/bin/appimagetool-x86_64.AppImage" ./packaging/build_appimage.sh
-# (This replaces the legacy tool from the old AppImageKit repo.)
+#   https://github.com/AppImage/appimagetool/releases
+# The tool is not committed to git. Resolve order:
+#   1) APPIMAGETOOL env var (full path to the AppImage or binary)
+#   2) `appimagetool` on PATH
+#   3) packaging/.tools/appimagetool*.AppImage or packaging/.tools/appimagetool (gitignored — drop the download here)
+# Each run rebuilds from the current working tree and commandcentre/__init__.py __version__.
 #
 # Development workflow (unchanged): use a normal venv and run:
 #   pip install -r commandcentre/requirements.txt
@@ -43,11 +43,35 @@ if [[ -n "${APPIMAGETOOL:-}" ]]; then
   APPIMAGETOOL_BIN="$(readlink -f "$APPIMAGETOOL")"
 elif command -v appimagetool >/dev/null 2>&1; then
   APPIMAGETOOL_BIN="$(command -v appimagetool)"
-else
-  echo "appimagetool not found. Install the standalone release from:" >&2
+fi
+
+if [[ -z "$APPIMAGETOOL_BIN" ]]; then
+  TOOLS_DIR="$ROOT/packaging/.tools"
+  if [[ -d "$TOOLS_DIR" ]]; then
+    shopt -s nullglob
+    for cand in "$TOOLS_DIR"/appimagetool*.AppImage "$TOOLS_DIR"/appimagetool; do
+      if [[ -f "$cand" ]]; then
+        if [[ ! -x "$cand" ]]; then
+          echo "Found appimagetool in packaging/.tools but it is not executable: $cand" >&2
+          echo "Run: chmod +x \"$cand\"" >&2
+          exit 1
+        fi
+        APPIMAGETOOL_BIN="$(readlink -f "$cand")"
+        echo "==> Using appimagetool from packaging/.tools (gitignored): $APPIMAGETOOL_BIN" >&2
+        break
+      fi
+    done
+    shopt -u nullglob
+  fi
+fi
+
+if [[ -z "$APPIMAGETOOL_BIN" ]]; then
+  echo "appimagetool not found. Download a release from:" >&2
   echo "  https://github.com/AppImage/appimagetool/releases" >&2
-  echo "Then chmod +x the downloaded appimagetool-x86_64.AppImage (or your arch) and either add it to PATH as" >&2
-  echo "'appimagetool' or set APPIMAGETOOL to its full path when running this script." >&2
+  echo "chmod +x the file, then either:" >&2
+  echo "  - Put it on PATH as appimagetool, or" >&2
+  echo "  - Set APPIMAGETOOL=/path/to/appimagetool-x86_64.AppImage, or" >&2
+  echo "  - Save it under packaging/.tools/ (gitignored) matching appimagetool*.AppImage" >&2
   exit 1
 fi
 
@@ -86,6 +110,12 @@ pyinstaller "$ROOT/packaging/CommandCentre.spec" --clean --noconfirm
 
 if [[ ! -x "$DIST_PY/commandcentre" ]]; then
   echo "Expected executable missing: $DIST_PY/commandcentre" >&2
+  exit 1
+fi
+
+if ! find "$DIST_PY" -name QtWebEngineProcess -type f 2>/dev/null | grep -q .; then
+  echo "ERROR: QtWebEngineProcess not found under $DIST_PY (PyQt6-WebEngine not bundled)." >&2
+  echo "Install PyQt6-WebEngine in the build venv and check packaging/CommandCentre.spec." >&2
   exit 1
 fi
 

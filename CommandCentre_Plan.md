@@ -44,6 +44,8 @@ Core organizational unit. Each workspace represents a distinct project, hobby, o
 - **Resources:** Optional linked resources from library.
 - **Blocking Tasks:** Optional task dependencies. Blocked tasks are dimmed and cannot move to the done column until unblocked.
 - **Client filters:** Text and priority filters on the board; due-today pulse and overdue left border use the **local** calendar date.
+- **Markdown trust:** Descriptions are **trusted local notes**: HTML embedded in Markdown is not sanitized. Do not paste untrusted documents into task descriptions.
+- **Links in descriptions:** Only `http`, `https`, `mailto`, and `file` URLs are opened (via the system browser or default handler). The embedded webview does not navigate to these links. **Relative** links and other schemes are unsupported (no in-app navigation). In-document fragment links (`#…`) only prevent navigation.
 
 ### Universal tray
 

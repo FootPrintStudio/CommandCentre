@@ -58,4 +58,18 @@ python -m pip install qtpy PyQt6
 python -m commandcentre
 ```
 
-# CommandCentre
+## AppImage (local, always matches your tree)
+
+The packager binary is **not** in git (`packaging/.tools/` is gitignored). To produce an **up-to-date** bundle from whatever is currently checked out:
+
+1. Download **appimagetool** for your arch from [AppImage/appimagetool releases](https://github.com/AppImage/appimagetool/releases).
+2. From the repo root:
+   ```bash
+   mkdir -p packaging/.tools
+   mv ~/Downloads/appimagetool-x86_64.AppImage packaging/.tools/
+   chmod +x packaging/.tools/appimagetool-x86_64.AppImage
+   ./packaging/build_appimage.sh
+   ```
+3. Installable output: `dist/CommandCentre-<version>-x86_64.AppImage` (version comes from `commandcentre/__init__.py`).
+
+The script recreates the build venv and runs PyInstaller each time, so the AppImage reflects your latest code without committing the builder.

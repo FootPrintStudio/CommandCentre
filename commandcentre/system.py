@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+from urllib.parse import urlparse
 import base64
 import mimetypes
 import webbrowser
@@ -151,6 +152,32 @@ def open_resource(path_or_url: str, resource_type: str) -> dict:
             webbrowser.open(path_or_url)
         else:
             subprocess.Popen(["xdg-open", path_or_url])
+        return {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+
+
+_MARKDOWN_HREF_ALLOWED_SCHEMES = frozenset({"http", "https", "mailto", "file"})
+
+
+def open_markdown_href(href: str) -> dict:
+    """Open a link from trusted Markdown in the system browser or file handler (never in-webview)."""
+    if href is None:
+        return {"ok": False, "error": "Invalid link"}
+    s = str(href).strip()
+    if not s:
+        return {"ok": False, "error": "Empty link"}
+    parsed = urlparse(s)
+    scheme = (parsed.scheme or "").lower()
+    if scheme in ("javascript", "data", "vbscript"):
+        return {"ok": False, "error": "Blocked link type"}
+    if scheme not in _MARKDOWN_HREF_ALLOWED_SCHEMES:
+        return {"ok": False, "error": "Unsupported or relative link"}
+    try:
+        if scheme == "file":
+            subprocess.Popen(["xdg-open", s])
+        else:
+            webbrowser.open(s)
         return {"ok": True}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)}

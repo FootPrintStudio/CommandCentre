@@ -668,7 +668,7 @@ function renderDashboard(apps, resources) {
                     (res) => `
                     <div class="cc-resource-row" data-resource-row="${res.id}" data-resource-category="${escapeHtml(category)}" title="${escapeHtml(res.name)} — drag to reorder">
                       <button type="button" class="text-left flex-1 min-w-0 hover:text-slate-50" data-open-resource="${res.id}">
-                        <div class="truncate">${res.name}</div>
+                        <div class="truncate">${escapeHtml(res.name)}</div>
                         ${
                           String(res.description || "").trim()
                             ? `<div class="mt-0.5 text-[11px] cc-muted whitespace-normal break-words [overflow-wrap:anywhere]">${escapeHtml(
@@ -959,7 +959,7 @@ function buildKanbanTaskCardHtml(task, doneColumnId) {
 
   const mdRaw = (task.description_md || "").trim();
   const mdBlock = mdRaw
-    ? `<div class="cc-task-md-wrap"><div class="task-card-md">${renderTaskCardMarkdownHtml(
+    ? `<div class="cc-task-md-wrap" data-cc-md-content="true"><div class="task-card-md">${renderTaskCardMarkdownHtml(
         task.description_md || ""
       )}</div></div>`
     : "";
@@ -1094,7 +1094,7 @@ function renderKanban() {
       <div class="flex items-center justify-between gap-2 mb-2">
         <div class="flex min-w-0 flex-1 items-center gap-2">
           <button type="button" class="cc-kanban-col-drag" data-drag-column="${column.id}" title="Drag to reorder">⇆</button>
-          <h3 class="truncate font-semibold">${column.name}${
+          <h3 class="truncate font-semibold">${escapeHtml(column.name)}${
             columnIsDoneColumn(column) ? ' <span class="cc-done-label">(done)</span>' : ""
           }</h3>
         </div>
@@ -1952,7 +1952,9 @@ function openSearchModal() {
     })
     .catch((error) => {
       console.error(error);
-      el("searchResults").innerHTML = `<div class="text-red-300 px-2 py-2">Failed to load search index: ${error.message}</div>`;
+      el("searchResults").innerHTML = `<div class="text-red-300 px-2 py-2">Failed to load search index: ${escapeHtml(
+        String(error?.message ?? error)
+      )}</div>`;
     });
 }
 window.commandCentreOpenSearch = openSearchModal;
@@ -2346,7 +2348,9 @@ function renderBlockingQuickLinks(task) {
       if (!blocker) {
         return `<span class="rounded border border-amber-700/60 px-2 py-1 text-[11px] text-amber-300">Missing blocker task</span>`;
       }
-      return `<button data-open-blocker="${blocker.id}" class="rounded border border-amber-700/60 px-2 py-1 text-[11px] text-amber-300 hover:bg-amber-950/40">Open #${blocker.id}: ${blocker.title}</button>`;
+      return `<button data-open-blocker="${blocker.id}" class="rounded border border-amber-700/60 px-2 py-1 text-[11px] text-amber-300 hover:bg-amber-950/40">Open #${blocker.id}: ${escapeHtml(
+        String(blocker.title ?? "")
+      )}</button>`;
     })
     .join("");
 }
@@ -2423,7 +2427,37 @@ async function bootstrap() {
   renderAll();
 }
 
+function wireMarkdownExternalLinks() {
+  function onMarkdownLinkNavigate(ev) {
+    if (ev.type === "auxclick" && ev.button !== 1) return;
+    const t = ev.target;
+    const el = t.nodeType === Node.TEXT_NODE ? t.parentElement : t;
+    if (!el || !el.closest) return;
+    const mdRoot = el.closest("[data-cc-md-content]");
+    if (!mdRoot) return;
+    const a = el.closest("a[href]");
+    if (!a) return;
+    const href = a.getAttribute("href");
+    if (!href) return;
+    if (href === "#" || href.startsWith("#")) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      return;
+    }
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    apiCall("open_markdown_href", href)
+      .then((r) => {
+        if (r && r.ok === false) notify(r.error || "Could not open link", "error");
+      })
+      .catch((err) => notify(err.message || String(err), "error"));
+  }
+  document.addEventListener("click", onMarkdownLinkNavigate, true);
+  document.addEventListener("auxclick", onMarkdownLinkNavigate, true);
+}
+
 function initUI() {
+  wireMarkdownExternalLinks();
   applyUserCustomCssFromApi().catch(() => {});
   startDashboardClock();
   el("showDashboard").onclick = () => setView("dashboard");

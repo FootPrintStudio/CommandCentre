@@ -1,18 +1,24 @@
 /**
- * CommandCentre default theme — bundled canonical stylesheet.
+ * CommandCentre default theme — simple modern dark UI.
  * Override via Settings → Custom CSS (injected after this file as #cc-user-css).
  */
 :root {
+  --cc-font-terminal: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --cc-radius: 0.375rem;
+  --cc-text-glow: none;
+  --cc-text-glow-strong: none;
+
   --cc-bg-app: rgb(2 6 23);
-  --cc-bg-panel: rgb(2 6 23);
-  --cc-bg-surface: rgb(15 23 42);
-  --cc-bg-surface-50: rgb(15 23 42 / 0.5);
-  --cc-bg-surface-95: rgb(2 6 23 / 0.95);
-  --cc-bg-elevated: rgb(15 23 42 / 0.4);
-  --cc-border: rgb(30 41 59);
-  --cc-border-strong: rgb(51 65 85);
-  --cc-border-focus: rgb(56 189 248 / 0.45);
-  --cc-text: rgb(241 245 249);
+  --cc-bg-panel: rgb(15 23 42);
+  --cc-bg-surface: rgb(30 41 59);
+  --cc-bg-surface-50: rgb(30 41 59 / 0.5);
+  --cc-bg-surface-95: rgb(15 23 42 / 0.97);
+  --cc-bg-elevated: rgb(30 41 59 / 0.45);
+  --cc-border: rgb(51 65 85);
+  --cc-border-strong: rgb(71 85 105);
+  --cc-border-focus: rgb(56 189 248 / 0.5);
+  --cc-text: rgb(248 250 252);
   --cc-text-secondary: rgb(203 213 225);
   --cc-text-muted: rgb(148 163 184);
   --cc-text-dim: rgb(100 116 139);
@@ -26,26 +32,32 @@
   --cc-accent-emerald: rgb(4 120 87);
   --cc-accent-emerald-hover: rgb(5 150 105);
   --cc-accent-violet: rgb(124 58 237);
-  --cc-accent-amber: rgb(253 224 71 / 0.9);
-  --cc-accent-red: rgb(185 28 28);
-  --cc-accent-red-hover: rgb(220 38 38);
+  --cc-accent-amber: rgb(251 191 36 / 0.95);
+  --cc-accent-red: rgb(220 38 38);
+  --cc-accent-red-hover: rgb(248 113 113);
   --cc-btn-secondary-bg: rgb(30 41 59);
   --cc-btn-secondary-hover: rgb(51 65 85);
   --cc-btn-muted-bg: rgb(55 65 81);
   --cc-btn-muted-hover: rgb(75 85 99);
-  --cc-modal-overlay: rgb(0 0 0 / 0.6);
-  --cc-shadow-modal: 0 25px 50px -12px rgb(0 0 0 / 0.25);
-  --cc-due-pulse: rgba(56, 189, 248, 0.45);
-  --cc-due-pulse-strong: rgba(56, 189, 248, 0.85);
+  --cc-modal-overlay: rgb(0 0 0 / 0.55);
+  --cc-shadow-modal: 0 25px 50px -12px rgb(0 0 0 / 0.35);
+  --cc-due-pulse: rgb(56 189 248 / 0.45);
+  --cc-due-pulse-strong: rgb(56 189 248 / 0.85);
   --cc-overdue-border: rgb(239 68 68 / 0.85);
-  --cc-search-selected-outline: rgb(139 92 246 / 0.65);
+  --cc-search-selected-outline: rgb(139 92 246 / 0.55);
   --cc-search-selected-bg: rgb(15 23 42 / 0.95);
 }
 
 /* --- App shell --- */
 .cc-app {
+  font-family: var(--cc-font-terminal);
+  font-size: 1rem;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
   background-color: var(--cc-bg-app);
   color: var(--cc-text);
+  text-shadow: none;
+  position: relative;
 }
 
 .cc-header {
@@ -54,19 +66,29 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  position: relative;
+  z-index: 1;
+  box-shadow: 0 1px 0 rgb(0 0 0 / 0.2);
 }
 
 .cc-main {
   padding: 1rem;
   height: calc(100vh - 64px);
   overflow: hidden;
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .cc-section-title {
-  font-size: 1.125rem;
-  line-height: 1.75rem;
+  font-size: 1.25rem;
+  line-height: 1.5rem;
   font-weight: 600;
   color: var(--cc-text);
+  text-shadow: none;
+  letter-spacing: -0.01em;
 }
 
 .cc-section-title--interactive {
@@ -74,16 +96,17 @@
   user-select: none;
 }
 .cc-section-title--interactive:hover {
-  color: var(--cc-text);
+  color: var(--cc-accent-sky-bright);
 }
 
 .cc-dashboard-panel {
-  border-radius: 0.25rem;
-  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius);
+  border: 1px solid var(--cc-border-strong);
   padding: 0.75rem;
   display: flex;
   flex-direction: column;
   background: var(--cc-bg-surface-95);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
 }
 
 /* --- Modals (z-index from Tailwind on element, e.g. z-50 z-[65]) --- */
@@ -109,10 +132,11 @@
 
 .cc-modal-panel {
   width: 100%;
-  border-radius: 0.5rem;
-  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius);
+  border: 1px solid var(--cc-border-strong);
   background: var(--cc-bg-panel);
   box-shadow: var(--cc-shadow-modal);
+  text-shadow: none;
 }
 
 .cc-modal-panel--lg {
@@ -140,9 +164,11 @@
 }
 
 .cc-modal-title {
-  font-size: 0.875rem;
+  font-size: 1.05rem;
   line-height: 1.25rem;
   color: var(--cc-text-secondary);
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .cc-modal-body {
@@ -150,9 +176,10 @@
 }
 
 .cc-settings-section {
-  border-radius: 0.25rem;
+  border-radius: var(--cc-radius);
   border: 1px solid var(--cc-border);
   padding: 0.75rem;
+  background: rgb(0 0 0 / 0.15);
 }
 
 .cc-settings-section--stack {
@@ -176,13 +203,15 @@
 .cc-select,
 .cc-textarea {
   width: 100%;
-  border-radius: 0.25rem;
+  border-radius: var(--cc-radius);
   background: var(--cc-bg-surface);
   border: 1px solid var(--cc-border);
   padding: 0.5rem 0.75rem;
-  font-size: 0.875rem;
+  font-size: 1rem;
   line-height: 1.25rem;
+  font-family: var(--cc-font-terminal);
   color: var(--cc-text);
+  text-shadow: none;
 }
 
 .cc-input:focus,
@@ -193,15 +222,15 @@
 }
 
 .cc-textarea--mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--cc-font-terminal);
 }
 
 .cc-custom-css-input {
   width: 100%;
   min-height: 12rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.75rem;
-  line-height: 1.4;
+  font-family: var(--cc-font-terminal);
+  font-size: 0.95rem;
+  line-height: 1.35;
   resize: vertical;
 }
 
@@ -210,9 +239,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 0.25rem;
-  font-size: 0.875rem;
+  border-radius: var(--cc-radius);
+  font-size: 1rem;
   line-height: 1.25rem;
+  font-family: var(--cc-font-terminal);
   padding: 0.5rem 0.75rem;
   cursor: pointer;
   border: none;
@@ -252,14 +282,18 @@
 .cc-btn-primary {
   background: var(--cc-accent-emerald-hover);
   color: var(--cc-text-invert);
+  text-shadow: none;
+  box-shadow: none;
 }
 .cc-btn-primary:hover:not(:disabled) {
   filter: brightness(1.08);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.25);
 }
 
 .cc-btn-danger {
   background: var(--cc-accent-red);
-  color: var(--cc-text-invert);
+  color: rgb(254 242 242);
+  text-shadow: none;
 }
 .cc-btn-danger:hover:not(:disabled) {
   background: var(--cc-accent-red-hover);
@@ -276,16 +310,19 @@
 .cc-btn-new-ws {
   margin-left: 0.5rem;
   flex-shrink: 0;
-  border-radius: 0.25rem;
-  background: var(--cc-accent-blue);
+  border-radius: var(--cc-radius);
+  background: var(--cc-accent-emerald-hover);
   padding: 0.25rem 0.625rem;
-  font-size: 1rem;
-  font-weight: 600;
+  font-size: 1.25rem;
+  font-weight: 500;
   line-height: 1;
   color: var(--cc-text-invert);
+  text-shadow: none;
+  box-shadow: none;
 }
 .cc-btn-new-ws:hover:not(:disabled) {
-  background: var(--cc-accent-blue-hover);
+  background: var(--cc-accent-emerald);
+  filter: brightness(1.06);
 }
 
 .cc-btn-ghost {
@@ -315,32 +352,32 @@
   width: 100%;
   max-height: 7rem;
   overflow-y: auto;
-  border-radius: 0.25rem;
+  border-radius: var(--cc-radius);
   border: 1px solid var(--cc-border);
   background: var(--cc-bg-surface);
   padding: 0.375rem 0.5rem;
 }
 
 .cc-import-box {
-  border-radius: 0.25rem;
+  border-radius: var(--cc-radius);
   border: 1px solid var(--cc-border);
-  background: rgb(15 23 42 / 0.5);
+  background: rgb(0 0 0 / 0.35);
   padding: 0.75rem;
 }
 
 .cc-icon-row {
-  border-radius: 0.25rem;
+  border-radius: var(--cc-radius);
   border: 1px solid var(--cc-border);
-  background: rgb(2 6 23 / 0.4);
+  background: rgb(0 0 0 / 0.3);
   padding: 0.75rem;
 }
 
 .cc-search-scope {
   display: inline-flex;
-  border-radius: 0.25rem;
-  border: 1px solid rgb(55 65 81);
+  border-radius: var(--cc-radius);
+  border: 1px solid var(--cc-border-strong);
   padding: 0.125rem;
-  font-size: 0.75rem;
+  font-size: 0.85rem;
   line-height: 1rem;
 }
 
@@ -357,8 +394,10 @@
 }
 
 .cc-search-scope-btn--active {
-  background: var(--cc-accent-violet);
+  background: var(--cc-accent-emerald-hover);
   color: var(--cc-text-invert);
+  text-shadow: none;
+  box-shadow: none;
 }
 
 /* --- Slide toggles --- */
@@ -401,7 +440,7 @@
   width: 1.25rem;
   height: 1.25rem;
   border-radius: 9999px;
-  background: white;
+  background: rgb(248 250 252);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
   transition: transform 0.2s ease;
 }
@@ -419,12 +458,12 @@
   100% {
     box-shadow:
       0 0 0 1px var(--cc-due-pulse),
-      0 0 10px rgba(56, 189, 248, 0.12);
+      0 0 12px rgb(56 189 248 / 0.2);
   }
   50% {
     box-shadow:
       0 0 0 2px var(--cc-due-pulse-strong),
-      0 0 18px rgba(56, 189, 248, 0.35);
+      0 0 18px rgb(56 189 248 / 0.35);
   }
 }
 .task-card-due-pulse {
@@ -479,7 +518,7 @@
 .task-card-md h5,
 .task-card-md h6 {
   font-size: 1em;
-  color: rgb(226 232 240);
+  color: var(--cc-text-secondary);
 }
 .task-card-md p {
   margin: 0.4em 0;
@@ -525,10 +564,10 @@
 .task-card-md blockquote {
   margin: 0.45em 0;
   padding: 0.35em 0 0.35em 0.65em;
-  border-left: 3px solid rgb(71 85 105);
-  color: rgb(186 199 216);
-  background: rgb(15 23 42 / 0.45);
-  border-radius: 0 4px 4px 0;
+  border-left: 3px solid var(--cc-border-strong);
+  color: var(--cc-text-muted);
+  background: rgb(0 0 0 / 0.35);
+  border-radius: 0 var(--cc-radius) var(--cc-radius) 0;
 }
 .task-card-md blockquote > :first-child {
   margin-top: 0;
@@ -542,21 +581,21 @@
   border-top: 1px solid var(--cc-border-strong);
 }
 .task-card-md code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--cc-font-terminal);
   font-size: 0.92em;
-  background: var(--cc-bg-surface);
-  border: 1px solid var(--cc-border-strong);
-  border-radius: 3px;
+  background: rgb(15 23 42);
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius);
   padding: 0.08em 0.28em;
-  color: rgb(226 232 240);
+  color: var(--cc-accent-sky-bright);
 }
 .task-card-md pre {
   margin: 0.45em 0;
   padding: 0.45em 0.55em;
   overflow-x: auto;
-  border-radius: 4px;
+  border-radius: var(--cc-radius);
   border: 1px solid var(--cc-border-strong);
-  background: var(--cc-bg-surface);
+  background: rgb(15 23 42);
   font-size: 0.95em;
   line-height: 1.4;
 }
@@ -578,7 +617,7 @@
   width: max-content;
 }
 .task-card-md thead {
-  border-bottom: 2px solid rgb(71 85 105);
+  border-bottom: 2px solid var(--cc-border-strong);
 }
 .task-card-md th,
 .task-card-md td {
@@ -588,12 +627,12 @@
   vertical-align: top;
 }
 .task-card-md th {
-  background: rgb(15 23 42 / 0.85);
+  background: rgb(30 41 59 / 0.95);
   color: var(--cc-text);
   font-weight: 600;
 }
 .task-card-md tbody tr:nth-child(even) {
-  background: rgb(15 23 42 / 0.35);
+  background: rgb(0 0 0 / 0.2);
 }
 .task-card-md img {
   max-width: 100%;
@@ -641,23 +680,24 @@
 
 /* --- JS-generated UI (dashboard, kanban, search, workspace tabs) --- */
 .cc-kanban-column {
-  border-radius: 0.25rem;
-  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius);
+  border: 1px solid var(--cc-border-strong);
   padding: 0.75rem;
   background: var(--cc-bg-surface);
   min-width: min(100%, 20rem);
   flex: 1 1 20rem;
   max-width: 100%;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
 }
 
 .cc-task-card-surface {
-  background: var(--cc-bg-surface);
-  border-color: rgb(51 65 85 / 0.4);
+  background: rgb(30 41 59);
+  border-color: rgb(71 85 105 / 0.85);
 }
 
 .cc-task-card-blocked {
-  background: rgb(69 26 3 / 0.3);
-  border-color: rgb(180 83 9 / 0.6);
+  background: rgb(69 26 3 / 0.45);
+  border-color: rgb(217 119 6 / 0.65);
 }
 
 /* Workspace header tabs: use .cc-workspace-tab-active / .cc-workspace-tab-icon in app.js */
@@ -672,18 +712,20 @@
   box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.2);
 }
 .cc-toast--error {
-  border-color: rgb(185 28 28);
-  background: rgb(69 10 10 / 0.9);
+  border-color: rgb(248 113 113);
+  background: rgb(69 10 10 / 0.95);
   color: rgb(254 226 226);
+  text-shadow: none;
 }
 .cc-toast--success {
-  border-color: rgb(4 120 87);
-  background: rgb(6 78 59 / 0.9);
+  border-color: rgb(52 211 153);
+  background: rgb(6 78 59 / 0.95);
   color: rgb(209 250 229);
+  text-shadow: none;
 }
 .cc-toast--info {
   border-color: var(--cc-border-strong);
-  background: rgb(15 23 42 / 0.95);
+  background: var(--cc-bg-panel);
   color: var(--cc-text);
 }
 
@@ -692,8 +734,9 @@
   height: 1rem;
   width: 1rem;
   border-radius: 9999px;
-  border: 2px solid rgb(71 85 105);
-  border-top-color: var(--cc-accent-sky);
+  border: 2px solid var(--cc-border);
+  border-top-color: var(--cc-text);
+  box-shadow: none;
   animation: cc-loading-spin 0.8s linear infinite;
 }
 @keyframes cc-loading-spin {
@@ -706,16 +749,17 @@
   display: inline-block;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.025em;
-  color: var(--cc-text-secondary);
-  font-size: clamp(1.125rem, 2.5vw, 1.5rem);
+  letter-spacing: 0.04em;
+  color: var(--cc-text);
+  font-size: clamp(1.5rem, 3vw, 2.25rem);
+  text-shadow: none;
 }
 
 .cc-context-menu {
   min-width: 180px;
-  border-radius: 0.25rem;
-  border: 1px solid rgb(55 65 81);
-  background: var(--cc-bg-surface);
+  border-radius: var(--cc-radius);
+  border: 1px solid var(--cc-border-strong);
+  background: var(--cc-bg-panel);
   padding: 0.25rem;
   box-shadow: var(--cc-shadow-modal);
 }
@@ -740,33 +784,37 @@
 }
 .cc-context-item--danger {
   color: rgb(252 165 165);
+  text-shadow: none;
 }
 .cc-context-item--danger:hover {
-  background: rgb(127 29 29 / 0.7);
+  background: rgb(127 29 29 / 0.45);
 }
 
 .cc-btn-sky {
-  background: rgb(7 89 133);
-  color: var(--cc-text-invert);
+  background: rgb(30 58 138 / 0.65);
+  color: var(--cc-text);
+  text-shadow: none;
+  border: 1px solid var(--cc-border-strong);
 }
 .cc-btn-sky:hover:not(:disabled) {
-  background: rgb(3 105 161);
+  background: rgb(30 64 175 / 0.85);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
 }
 
 .cc-task-review-body {
   min-height: 8rem;
-  border-radius: 0.25rem;
+  border-radius: var(--cc-radius);
   border: 1px solid var(--cc-border);
-  background: rgb(15 23 42 / 0.5);
+  background: rgb(0 0 0 / 0.35);
   padding: 0.75rem;
-  font-size: 0.875rem;
-  line-height: 1.25rem;
+  font-size: 1rem;
+  line-height: 1.35rem;
 }
 
 .cc-search-result-row {
   width: 100%;
   text-align: left;
-  border-radius: 0.25rem;
+  border-radius: var(--cc-radius);
   padding: 0.5rem;
   display: flex;
   align-items: center;
@@ -791,36 +839,38 @@
   font-size: 10px;
 }
 .cc-priority-critical {
-  background: rgb(127 29 29 / 0.7);
+  background: rgb(127 29 29 / 0.75);
   color: rgb(254 202 202);
-  border-color: rgb(185 28 28 / 0.7);
+  border-color: rgb(248 113 113 / 0.65);
+  text-shadow: none;
 }
 .cc-priority-high {
-  background: rgb(120 53 15 / 0.6);
-  color: rgb(253 230 138);
-  border-color: rgb(180 83 9 / 0.7);
+  background: rgb(120 53 15 / 0.75);
+  color: rgb(254 243 199);
+  border-color: rgb(251 191 36 / 0.55);
+  text-shadow: none;
 }
 .cc-priority-medium {
-  background: var(--cc-btn-secondary-bg);
+  background: rgb(30 41 59 / 0.95);
   color: var(--cc-text-secondary);
-  border-color: rgb(51 65 85);
+  border-color: var(--cc-border-strong);
 }
 .cc-priority-low {
-  background: rgb(12 74 110 / 0.6);
-  color: rgb(186 230 253);
-  border-color: rgb(3 105 161 / 0.7);
+  background: rgb(15 23 42 / 0.9);
+  color: rgb(148 163 184);
+  border-color: rgb(71 85 105 / 0.75);
 }
 
 .cc-task-card {
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
-  border-radius: 0.25rem;
+  border-radius: var(--cc-radius);
   border-width: 1px;
   border-style: solid;
   padding: 0.5rem;
-  font-size: 0.875rem;
-  line-height: 1.25rem;
+  font-size: 1rem;
+  line-height: 1.3rem;
   cursor: grab;
 }
 .cc-task-card:active {
@@ -836,9 +886,9 @@
 .cc-task-md-wrap {
   max-height: 10rem;
   overflow: auto;
-  border-radius: 0.25rem;
-  border: 1px solid rgb(51 65 85 / 0.4);
-  background: rgb(2 6 23 / 0.35);
+  border-radius: var(--cc-radius);
+  border: 1px solid var(--cc-border);
+  background: rgb(0 0 0 / 0.4);
   padding: 0.375rem 0.5rem;
 }
 
@@ -848,15 +898,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: left;
-  color: rgb(125 211 252);
+  color: var(--cc-accent-sky-bright);
   background: none;
   border: none;
   cursor: pointer;
   padding: 0;
   font-size: inherit;
+  text-shadow: none;
 }
 .cc-link-sky:hover {
-  color: rgb(224 242 254);
+  color: var(--cc-accent-sky);
   text-decoration: underline;
 }
 
@@ -866,27 +917,29 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: left;
-  color: rgb(110 231 183);
+  color: var(--cc-text);
   background: none;
   border: none;
   cursor: pointer;
   padding: 0;
   font-size: inherit;
+  text-shadow: none;
 }
 .cc-link-emerald:hover {
-  color: rgb(167 243 208);
+  color: var(--cc-accent-sky-bright);
   text-decoration: underline;
 }
 
 .cc-link-danger {
   margin-left: 0.5rem;
-  font-size: 0.75rem;
+  font-size: 0.85rem;
   line-height: 1rem;
   color: rgb(252 165 165);
   background: none;
   border: none;
   cursor: pointer;
   padding: 0;
+  text-shadow: none;
 }
 .cc-link-danger:hover {
   color: rgb(254 202 202);
@@ -925,10 +978,11 @@
 
 .cc-done-label {
   white-space: nowrap;
-  font-size: 0.75rem;
+  font-size: 0.85rem;
   line-height: 1rem;
-  font-weight: 400;
-  color: rgb(52 211 153);
+  font-weight: 500;
+  color: var(--cc-accent-emerald-hover);
+  text-shadow: none;
 }
 
 .cc-app-launch-tile {
@@ -939,30 +993,30 @@
   height: 2.75rem;
   width: 2.75rem;
   flex-shrink: 0;
-  border-radius: 0.5rem;
-  border: 1px solid rgb(71 85 105);
-  background: linear-gradient(to bottom, rgb(51 65 85), rgb(30 41 59));
+  border-radius: var(--cc-radius);
+  border: 1px solid var(--cc-border-strong);
+  background: linear-gradient(180deg, rgb(51 65 85), rgb(30 41 59));
   font-size: 1.125rem;
   line-height: 1;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
   transition:
     border-color 0.15s ease,
-    background 0.15s ease;
+    box-shadow 0.15s ease;
 }
 .cc-app-launch-tile:hover {
-  border-color: rgb(14 165 233 / 0.6);
-  background: linear-gradient(to bottom, rgb(71 85 105), rgb(51 65 85));
+  border-color: rgb(100 116 139);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.25);
 }
 .cc-app-launch-tile:focus {
-  outline: 2px solid rgb(14 165 233 / 0.5);
+  outline: 2px solid rgb(56 189 248 / 0.45);
   outline-offset: 2px;
 }
 .cc-app-launch-tile--tray:hover {
-  border-color: rgb(139 92 246 / 0.6);
-  background: linear-gradient(to bottom, rgb(71 85 105), rgb(51 65 85));
+  border-color: rgb(167 139 250 / 0.65);
+  box-shadow: 0 4px 12px rgb(91 33 182 / 0.2);
 }
 .cc-app-launch-tile--tray:focus {
-  outline-color: rgb(139 92 246 / 0.5);
+  outline-color: rgb(167 139 250 / 0.55);
 }
 @media (min-width: 640px) {
   .cc-app-launch-tile {
@@ -998,9 +1052,10 @@
   cursor: grab;
   align-items: center;
   justify-content: space-between;
-  border-radius: 0.25rem;
-  background: var(--cc-bg-surface);
+  border-radius: var(--cc-radius);
+  background: rgb(30 41 59);
   padding: 0.25rem 0.5rem;
+  border: 1px solid rgb(0 0 0 / 0.2);
 }
 .cc-resource-row:active {
   cursor: grabbing;
@@ -1008,10 +1063,18 @@
 
 .cc-tray-divider-line {
   height: 2.25rem;
-  width: 1px;
+  width: 2px;
   flex-shrink: 0;
   border-radius: 9999px;
-  background: rgb(100 116 139 / 0.9);
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgb(100 116 139 / 0.35),
+    rgb(148 163 184 / 0.85),
+    rgb(100 116 139 / 0.35),
+    transparent
+  );
+  box-shadow: none;
 }
 
 .cc-workspace-tab-active {
@@ -1020,26 +1083,29 @@
   align-items: center;
   justify-content: center;
   gap: 0.375rem;
-  border-radius: 0.25rem;
-  background: var(--cc-accent-blue);
+  border-radius: var(--cc-radius);
+  background: var(--cc-accent-emerald-hover);
   padding: 0.375rem 0.75rem;
-  font-size: 0.875rem;
+  font-size: 1rem;
   line-height: 1.25rem;
   font-weight: 500;
   color: var(--cc-text-invert);
   white-space: nowrap;
+  text-shadow: none;
+  box-shadow: none;
+  border: 1px solid rgb(16 185 129 / 0.45);
 }
 
 .cc-workspace-tab-icon {
   flex-shrink: 0;
   min-width: 2.25rem;
-  border-radius: 0.25rem;
+  border-radius: var(--cc-radius);
   background: var(--cc-btn-secondary-bg);
   padding: 0.375rem 0.5rem;
   font-size: 1.125rem;
   line-height: 1;
   color: var(--cc-text-secondary);
-  border: 1px solid transparent;
+  border: 1px solid var(--cc-border);
 }
 .cc-workspace-tab-icon:hover:not(:disabled) {
   background: var(--cc-btn-secondary-hover);
@@ -1047,4 +1113,77 @@
 
 .cc-modal-body--tight {
   padding-top: 0.5rem;
+}
+
+/* --- Tailwind CDN leftovers in markup / dynamic HTML → theme tokens --- */
+.cc-app .text-slate-200 {
+  color: var(--cc-text-secondary) !important;
+}
+.cc-app .text-slate-300 {
+  color: var(--cc-text-secondary) !important;
+}
+.cc-app .text-slate-400 {
+  color: var(--cc-text-muted) !important;
+}
+.cc-app .text-slate-500 {
+  color: var(--cc-text-dim) !important;
+}
+.cc-app .text-slate-100 {
+  color: var(--cc-text) !important;
+}
+.cc-app .border-slate-700,
+.cc-app .border-slate-800 {
+  border-color: var(--cc-border) !important;
+}
+.cc-app .bg-slate-900,
+.cc-app .bg-slate-950,
+.cc-app .hover\:bg-slate-900:hover {
+  background-color: rgb(15 23 42) !important;
+}
+.cc-app .hover\:bg-slate-800:hover {
+  background-color: var(--cc-btn-secondary-hover) !important;
+}
+.cc-app .prose,
+.cc-app .prose-invert {
+  color: var(--cc-text-secondary);
+}
+.cc-app .prose strong,
+.cc-app .prose-invert strong {
+  color: var(--cc-text);
+}
+
+.cc-app .text-slate-50 {
+  color: var(--cc-text) !important;
+}
+.cc-app .hover\:text-slate-200:hover {
+  color: var(--cc-text-secondary) !important;
+}
+.cc-app .hover\:text-slate-50:hover {
+  color: var(--cc-text) !important;
+}
+.cc-app .text-red-300 {
+  color: rgb(252 165 165) !important;
+  text-shadow: none;
+}
+.cc-app .text-amber-300 {
+  color: var(--cc-accent-amber) !important;
+  text-shadow: none;
+}
+.cc-app .border-amber-700\/60 {
+  border-color: rgb(200 120 40 / 0.55) !important;
+}
+.cc-app .hover\:bg-amber-950\/40:hover {
+  background: rgb(40 28 8 / 0.5) !important;
+}
+.cc-app .border-slate-700\/50 {
+  border-color: rgb(51 65 85 / 0.5) !important;
+}
+.cc-app [class*="bg-slate-950"] {
+  background-color: rgb(2 6 23 / 0.82) !important;
+}
+.cc-app .hover\:bg-slate-800\/80:hover {
+  background: rgb(51 65 85 / 0.85) !important;
+}
+.cc-app .ring-blue-500 {
+  --tw-ring-color: rgb(56 189 248 / 0.45);
 }

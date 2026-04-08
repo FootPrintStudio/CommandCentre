@@ -1,4 +1,26 @@
+import os
 import sys
+
+
+def _clear_leaked_appimage_qt_env():
+    """AppImage AppRun sets QTWEBENGINEPROCESS_PATH / QT_PLUGIN_PATH. If that leaks into a shell,
+    `python -m commandcentre` from a venv still points Qt at /tmp/.mount_*/cc-bundle and crashes
+    when the helper is missing or wrong. Frozen PyInstaller builds keep these from AppRun."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return
+    qtp = (os.environ.get("QTWEBENGINEPROCESS_PATH") or "").strip()
+    if qtp:
+        norm = qtp.replace("\\", "/")
+        if ".mount_" in norm or "/cc-bundle/" in norm or not os.path.isfile(qtp):
+            os.environ.pop("QTWEBENGINEPROCESS_PATH", None)
+    qpp = (os.environ.get("QT_PLUGIN_PATH") or "").strip()
+    if qpp:
+        norm = qpp.replace("\\", "/")
+        if ".mount_" in norm or "/cc-bundle/" in norm:
+            os.environ.pop("QT_PLUGIN_PATH", None)
+
+
+_clear_leaked_appimage_qt_env()
 
 import webview
 

@@ -84,7 +84,7 @@
     </header>
 
     <main class="cc-main">
-      <section id="dashboardView" class="h-full overflow-hidden flex flex-col gap-3">
+      <section id="dashboardView" class="flex-1 min-h-0 h-full overflow-hidden flex flex-col gap-3">
         <div id="dashboardScrollable" class="flex-1 overflow-y-auto flex flex-col gap-3">
           <div class="shrink-0 text-center">
             <time id="dashboardClock" class="cc-clock" datetime=""></time>
@@ -152,7 +152,7 @@
         </div>
       </section>
 
-      <section id="kanbanView" class="hidden">
+      <section id="kanbanView" class="hidden flex-1 min-h-0 flex flex-col overflow-y-auto">
         <div class="flex flex-col gap-2 mb-3">
           <div class="flex items-center justify-between gap-2">
             <h2 class="cc-section-title">Kanban</h2>
@@ -248,6 +248,7 @@
               <div
                 id="taskDescriptionPreview"
                 class="hidden prose prose-invert max-w-none cc-input text-sm"
+                data-cc-md-content="true"
               ></div>
             </label>
 
